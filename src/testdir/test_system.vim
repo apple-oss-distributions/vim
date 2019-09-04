@@ -1,6 +1,6 @@
 " Tests for system() and systemlist()
 
-function! Test_System()
+func Test_System()
   if !executable('echo') || !executable('cat') || !executable('wc')
     return
   endif
@@ -45,16 +45,16 @@ function! Test_System()
   bwipe!
 
   call assert_fails('call system("wc -l", 99999)', 'E86:')
-endfunction
+endfunc
 
-function! Test_system_exmode()
+func Test_system_exmode()
   if has('unix') " echo $? only works on Unix
-    let cmd = ' -es -u NONE -c "source Xscript" +q; echo $?'
+    let cmd = ' -es -u NONE -c "source Xscript" +q; echo "result=$?"'
     " Need to put this in a script, "catch" isn't found after an unknown
     " function.
     call writefile(['try', 'call doesnotexist()', 'catch', 'endtry'], 'Xscript')
     let a = system(v:progpath . cmd)
-    call assert_equal('0', a[0])
+    call assert_match('result=0', a)
     call assert_equal(0, v:shell_error)
   endif
 

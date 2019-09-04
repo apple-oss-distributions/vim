@@ -9,15 +9,15 @@ endif
 
 source view_util.vim
 
-function s:screen_lines(lnum, width) abort
+func s:screen_lines(lnum, width) abort
   return ScreenLines(a:lnum, a:width)
-endfunction
+endfunc
 
-function! s:compare_lines(expect, actual)
+func s:compare_lines(expect, actual)
   call assert_equal(a:expect, a:actual)
-endfunction
+endfunc
 
-function s:screen_attr(lnum, chars, ...) abort
+func s:screen_attr(lnum, chars, ...) abort
   let line = getline(a:lnum)
   let attr = []
   let prefix = get(a:000, 0, 0)
@@ -26,18 +26,18 @@ function s:screen_attr(lnum, chars, ...) abort
     let attr += [screenattr(a:lnum, scol + prefix)]
   endfor
   return attr
-endfunction
+endfunc
 
-function s:test_windows(...)
+func s:test_windows(...)
   call NewWindow(10, 20)
   setl ts=4 sw=4 sts=4 linebreak sbr=+ wrap
   exe get(a:000, 0, '')
-endfunction
+endfunc
 
-function s:close_windows(...)
+func s:close_windows(...)
   call CloseWindow()
   exe get(a:000, 0, '')
-endfunction
+endfunc
 
 func Test_linebreak_with_fancy_listchars()
   call s:test_windows("setl list listchars=nbsp:\u2423,tab:\u2595\u2014,trail:\u02d1,eol:\ub6")
@@ -192,6 +192,21 @@ func Test_multibyte_sign_and_colorcolumn()
 \ ]
   call s:compare_lines(expect, lines)
   call s:close_windows()
+endfunc
+
+func Test_colorcolumn_priority()
+  call s:test_windows('setl cc=4 cuc hls')
+  call setline(1, ["xxyy", ""])
+  norm! gg
+  exe "normal! /xxyy\<CR>"
+  norm! G
+  redraw!
+  let line_attr = s:screen_attr(1, [1, &cc])
+  " Search wins over CursorColumn
+  call assert_equal(line_attr[1], line_attr[0])
+  " Search wins over Colorcolumn
+  call assert_equal(line_attr[2], line_attr[3])
+  call s:close_windows('setl hls&vim')
 endfunc
 
 func Test_illegal_byte_and_breakat()

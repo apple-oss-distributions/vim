@@ -1,4 +1,4 @@
-*if_mzsch.txt*  For Vim version 8.0.  Last change: 2016 Jan 24
+*if_mzsch.txt*  For Vim version 8.1.  Last change: 2019 May 05
 
 
 		  VIM REFERENCE MANUAL    by Sergey Khorev
@@ -15,10 +15,7 @@ The MzScheme Interface to Vim				*mzscheme* *MzScheme*
 7. Dynamic loading			|mzscheme-dynamic|
 8. MzScheme setup			|mzscheme-setup|
 
-{Vi does not have any of these commands}
-
-The MzScheme interface is available only if Vim was compiled with the
-|+mzscheme| feature.
+{only available when Vim was compiled with the |+mzscheme| feature}
 
 Based on the work of Brent Fulgham.
 Dynamic loading added by Sergey Khorev
@@ -40,7 +37,7 @@ To speed up the process, you might also want to use --disable-gracket and
 
 							*:mzscheme* *:mz*
 :[range]mz[scheme] {stmt}
-			Execute MzScheme statement {stmt}.  {not in Vi}
+			Execute MzScheme statement {stmt}.
 
 :[range]mz[scheme] << {endmarker}
 {script}
@@ -51,7 +48,7 @@ To speed up the process, you might also want to use --disable-gracket and
 			|script-here|.
 
 							*:mzfile* *:mzf*
-:[range]mzf[ile] {file}	Execute the MzScheme script in {file}.  {not in Vi}
+:[range]mzf[ile] {file}	Execute the MzScheme script in {file}.
 
 All of these commands do essentially the same thing - they execute a piece of
 MzScheme code, with the "current range" set to the given line
@@ -278,12 +275,15 @@ When you don't use the MzScheme interface you don't need them, thus you can
 use Vim without these DLL files.
 NOTE: Newer version of MzScheme (Racket) require earlier (trampolined)
 initialisation via scheme_main_setup.  So Vim always loads the MzScheme DLL at
-startup if possible.
+startup if possible.  This may make Vim startup slower.
 
 To use the MzScheme interface the MzScheme DLLs must be in your search path.
 In a console window type "path" to see what directories are used.
 
-The names of the DLLs must match the MzScheme version Vim was compiled with.
+On MS-Windows the options 'mzschemedll' and 'mzschemegcdll' are used for the
+name of the library to load.  The initial value is specified at build time.
+
+The version of the DLL must match the MzScheme version Vim was compiled with.
 For MzScheme version 209 they will be "libmzsch209_000.dll" and
 "libmzgc209_000.dll". To know for sure look at the output of the ":version"
 command, look for -DDYNAMIC_MZSCH_DLL="something" and
@@ -309,4 +309,4 @@ MzScheme's raco command:
   raco pkg install cext-lib         # raco ctool command
 <
 ======================================================================
-  vim:tw=78:ts=8:sts=4:ft=help:norl:
+  vim:tw=78:ts=8:noet:sts=4:ft=help:norl:
