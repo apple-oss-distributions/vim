@@ -1,7 +1,7 @@
 " Vim support file to detect file types
 "
 " Maintainer:	Bram Moolenaar <Bram@vim.org>
-" Last Change:	2019 May 06
+" Last Change:	2020 May 07
 
 " Listen very carefully, I will say this only once
 if exists("did_load_filetypes")
@@ -233,11 +233,14 @@ au BufNewFile,BufRead *.bl			setf blank
 " Blkid cache file
 au BufNewFile,BufRead */etc/blkid.tab,*/etc/blkid.tab.old   setf xml
 
+" BSDL
+au BufNewFile,BufRead *bsd,*.bsdl		setf bsdl
+
 " Bazel (http://bazel.io)
 autocmd BufRead,BufNewFile *.bzl,WORKSPACE,BUILD.bazel 	setf bzl
 if has("fname_case")
   " There is another check for BUILD further below.
-  autocmd BufRead,BufNewFile BUILD			setf bzl
+  autocmd BufRead,BufNewFile BUILD		setf bzl
 endif
 
 " C or lpc
@@ -384,8 +387,8 @@ au BufNewFile,BufRead configure.in,configure.ac setf config
 " CUDA  Cumpute Unified Device Architecture
 au BufNewFile,BufRead *.cu,*.cuh		setf cuda
 
-" Dockerfile
-au BufNewFile,BufRead Dockerfile,*.Dockerfile	setf dockerfile
+" Dockerfile; Podman uses the same syntax with name Containerfile
+au BufNewFile,BufRead Containerfile,Dockerfile,*.Dockerfile	setf dockerfile
 
 " WildPackets EtherPeek Decoder
 au BufNewFile,BufRead *.dcd			setf dcd
@@ -424,6 +427,9 @@ au BufNewFile,BufRead *.csp,*.fdr		setf csp
 " CUPL logic description and simulation
 au BufNewFile,BufRead *.pld			setf cupl
 au BufNewFile,BufRead *.si			setf cuplsim
+
+" Dart
+au BufRead,BufNewfile *.dart,*.drt		setf dart
 
 " Debian Control
 au BufNewFile,BufRead */debian/control		setf debcontrol
@@ -488,7 +494,7 @@ au BufNewFile,BufRead *.rul
 au BufNewFile,BufRead *.com			call dist#ft#BindzoneCheck('dcl')
 
 " DOT
-au BufNewFile,BufRead *.dot			setf dot
+au BufNewFile,BufRead *.dot,*.gv		setf dot
 
 " Dylan - lid files
 au BufNewFile,BufRead *.lid			setf dylanlid
@@ -540,6 +546,9 @@ au BufNewFile,BufRead */etc/elinks.conf,*/.elinks/elinks.conf	setf elinks
 
 " ERicsson LANGuage; Yaws is erlang too
 au BufNewFile,BufRead *.erl,*.hrl,*.yaws	setf erlang
+
+" Elm
+au BufNewFile,BufRead *.elm			setf elm
 
 " Elm Filter Rules file
 au BufNewFile,BufRead filter-rules		setf elmfilt
@@ -701,6 +710,9 @@ au BufNewFile,BufRead *.vc,*.ev,*.sum,*.errsum	setf hercules
 " HEX (Intel)
 au BufNewFile,BufRead *.hex,*.h32		setf hex
 
+" Hollywood
+au BufRead,BufNewFile *.hws			setf hollywood
+
 " Tilde (must be before HTML)
 au BufNewFile,BufRead *.t.html			setf tilde
 
@@ -794,8 +806,11 @@ au BufNewFile,BufRead *.java,*.jav		setf java
 " JavaCC
 au BufNewFile,BufRead *.jj,*.jjt		setf javacc
 
-" JavaScript, ECMAScript
-au BufNewFile,BufRead *.js,*.javascript,*.es,*.jsx,*.mjs   setf javascript
+" JavaScript, ECMAScript, ES module script, CommonJS script
+au BufNewFile,BufRead *.js,*.javascript,*.es,*.mjs,*.cjs   setf javascript
+
+" JavaScript with React
+au BufNewFile,BufRead *.jsx			setf javascriptreact
 
 " Java Server Pages
 au BufNewFile,BufRead *.jsp			setf jsp
@@ -823,6 +838,9 @@ au BufNewFile,BufRead *.k			setf kwt
 
 " Kivy
 au BufNewFile,BufRead *.kv			setf kivy
+
+" Kotlin
+au BufNewFile,BufRead *.kt,*.ktm,*.kts		setf kotlin
 
 " KDE script
 au BufNewFile,BufRead *.ks			setf kscript
@@ -973,6 +991,9 @@ au BufNewFile,BufRead hg-editor-*.txt		setf hgcommit
 " Mercurial config (looks like generic config file)
 au BufNewFile,BufRead *.hgrc,*hgrc		setf cfg
 
+" Meson Build system config
+au BufNewFile,BufRead meson.build,meson_options.txt setf meson
+
 " Messages (logs mostly)
 au BufNewFile,BufRead */log/{auth,cron,daemon,debug,kern,lpr,mail,messages,news/news,syslog,user}{,.log,.err,.info,.warn,.crit,.notice}{,.[0-9]*,-[0-9]*} setf messages
 
@@ -1114,6 +1135,9 @@ au BufNewFile,BufRead pf.conf			setf pf
 
 " Pam conf
 au BufNewFile,BufRead */etc/pam.conf		setf pamconf
+
+" Pam environment
+au BufNewFile,BufRead pam_env.conf,.pam_environment	setf pamenv
 
 " PApp
 au BufNewFile,BufRead *.papp,*.pxml,*.pxsl	setf papp
@@ -1290,6 +1314,9 @@ au BufNewFile,BufRead *.reg
 
 " Renderman Interface Bytestream
 au BufNewFile,BufRead *.rib			setf rib
+
+" Rego Policy Language
+au BufNewFile,BufRead *.rego			setf rego
 
 " Rexx
 au BufNewFile,BufRead *.rex,*.orx,*.rxo,*.rxj,*.jrexx,*.rexxj,*.rexx,*.testGroup,*.testUnit	setf rexx
@@ -1612,15 +1639,26 @@ au BufNewFile,BufRead *.sml			setf sml
 " Sratus VOS command macro
 au BufNewFile,BufRead *.cm			setf voscm
 
+" Swift
+au BufNewFile,BufRead *.swift			setf swift
+au BufNewFile,BufRead *.swift.gyb 		setf swiftgyb
+
+" Swift Intermediate Language
+au BufNewFile,BufRead *.sil 			setf sil
+
 " Sysctl
 au BufNewFile,BufRead */etc/sysctl.conf,*/etc/sysctl.d/*.conf	setf sysctl
 
 " Systemd unit files
 au BufNewFile,BufRead */systemd/*.{automount,mount,path,service,socket,swap,target,timer}	setf systemd
 " Systemd overrides
-au BufNewFile,BufRead /etc/systemd/system/*.d/*.conf	setf systemd
+au BufNewFile,BufRead */etc/systemd/system/*.d/*.conf	setf systemd
+au BufNewFile,BufRead */.config/systemd/user/*.d/*.conf	setf systemd
 " Systemd temp files
-au BufNewFile,BufRead /etc/systemd/system/*.d/.#*	setf systemd
+au BufNewFile,BufRead */etc/systemd/system/*.d/.#*	setf systemd
+au BufNewFile,BufRead */etc/systemd/system/.#*		setf systemd
+au BufNewFile,BufRead */.config/systemd/user/*.d/.#*	setf systemd
+au BufNewFile,BufRead */.config/systemd/user/.#*	setf systemd
 
 " Synopsys Design Constraints
 au BufNewFile,BufRead *.sdc			setf sdc
@@ -1706,6 +1744,9 @@ au BufNewFile,BufReadPost *.twig		setf twig
 " Typescript
 au BufNewFile,BufReadPost *.ts			setf typescript
 
+" TypeScript with React
+au BufNewFile,BufRead *.tsx			setf typescriptreact
+
 " Motif UIT/UIL files
 au BufNewFile,BufRead *.uit,*.uil		setf uil
 
@@ -1745,7 +1786,7 @@ au BufNewFile,BufRead *.va,*.vams		setf verilogams
 au BufNewFile,BufRead *.sv,*.svh		setf systemverilog
 
 " VHDL
-au BufNewFile,BufRead *.hdl,*.vhd,*.vhdl,*.vbe,*.vst  setf vhdl
+au BufNewFile,BufRead *.hdl,*.vhd,*.vhdl,*.vbe,*.vst,*.vho  setf vhdl
 
 " Vim script
 au BufNewFile,BufRead *.vim,*.vba,.exrc,_exrc	setf vim
@@ -1776,11 +1817,14 @@ au BufNewFile,BufRead *.wrl			setf vrml
 " Vroom (vim testing and executable documentation)
 au BufNewFile,BufRead *.vroom			setf vroom
 
-" Webmacro
-au BufNewFile,BufRead *.wm			setf webmacro
+" Vue.js Single File Component
+au BufNewFile,BufRead *.vue			setf vue
 
 " WebAssembly
 au BufNewFile,BufRead *.wast,*.wat		setf wast
+
+" Webmacro
+au BufNewFile,BufRead *.wm			setf webmacro
 
 " Wget config
 au BufNewFile,BufRead .wgetrc,wgetrc		setf wget

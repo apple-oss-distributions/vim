@@ -38,7 +38,7 @@ test49.out: test49.vim
 
 test_options.res test_alot.res: opt_test.vim
 
-SCRIPTS_BENCH = bench_re_freeze.out
+SCRIPTS_BENCH = test_bench_regexp.res
 
 .SUFFIXES: .in .out .res .vim
 
@@ -49,10 +49,17 @@ gui:	nolog $(SCRIPTS_FIRST) $(SCRIPTS) $(SCRIPTS_GUI) newtests report
 benchmark: $(SCRIPTS_BENCH)
 
 report:
+	# without the +eval feature test_result.log is a copy of test.log
+	@/bin/sh -c "if test -f test.log; \
+		then cp test.log test_result.log; \
+		else echo No failures reported > test_result.log; \
+		fi"
+	$(VIMPROG) -u NONE $(NO_INITS) -S summarize.vim messages $(REDIR_TEST_TO_NULL)
 	@echo
 	@echo 'Test results:'
+	@cat test_result.log
 	@/bin/sh -c "if test -f test.log; \
-		then cat test.log; echo TEST FAILURE; exit 1; \
+		then echo TEST FAILURE; exit 1; \
 		else echo ALL DONE; \
 		fi"
 
@@ -66,18 +73,34 @@ $(SCRIPTS) $(SCRIPTS_GUI) $(NEW_TESTS_RES): $(SCRIPTS_FIRST)
 # 	make test_largefile
 $(NEW_TESTS):
 	rm -f $@.res test.log messages
-	$(MAKE) -f Makefile $@.res
+	@MAKEFLAGS=--no-print-directory $(MAKE) -f Makefile $@.res VIMPROG=$(VIMPROG) XXDPROG=$(XXDPROG) SCRIPTSOURCE=$(SCRIPTSOURCE)
+	@cat messages
 	@if test -f test.log; then \
-		cat test.log; \
+		exit 1; \
 	fi
-	cat messages
+
+# Run only tests specific for Vim9 script
+test_vim9:
+	rm -f test_vim9_*.res test.log messages
+	@MAKEFLAGS=--no-print-directory $(MAKE) -f Makefile $(TEST_VIM9_RES) VIMPROG=$(VIMPROG) XXDPROG=$(XXDPROG) SCRIPTSOURCE=$(SCRIPTSOURCE)
+	@cat messages
+	@MAKEFLAGS=--no-print-directory $(MAKE) -f Makefile report VIMPROG=$(VIMPROG) XXDPROG=$(XXDPROG) SCRIPTSOURCE=$(SCRIPTSOURCE)
+	@if test -f test.log; then \
+		exit 1; \
+	fi
 
 RM_ON_RUN = test.out X* viminfo
 RM_ON_START = tiny.vim small.vim mbyte.vim mzscheme.vim test.ok benchmark.out
-RUN_VIM = VIMRUNTIME=$(SCRIPTSOURCE); export VIMRUNTIME; $(VALGRIND) $(VIMPROG) -f $(GUI_FLAG) -u unix.vim $(NO_INITS) -s dotest.in
+RUN_VIM = VIMRUNTIME=$(SCRIPTSOURCE) $(VALGRIND) $(VIMPROG) -f $(GUI_FLAG) -u unix.vim $(NO_INITS) -s dotest.in
 
+# Delete files that may interfere with running tests.  This includes some files
+# that may result from working on the tests, not only from running them.
 clean:
-	-rm -rf *.out *.failed *.res *.rej *.orig opt_test.vim test.log messages $(RM_ON_RUN) $(RM_ON_START) valgrind.*
+	-rm -rf *.out *.failed *.res *.rej *.orig XfakeHOME Xdir1 Xfind
+	-rm -f opt_test.vim test.log test_result.log messages
+	-rm -f $(RM_ON_RUN) $(RM_ON_START)
+	-rm -f valgrind.*
+	-rm -f asan.*
 
 test1.out: test1.in
 	-rm -rf $*.failed $(RM_ON_RUN) $(RM_ON_START) wrongtermsize
@@ -124,15 +147,6 @@ test1.out: test1.in
 		fi"
 	-rm -rf X* test.ok viminfo
 
-bench_re_freeze.out: bench_re_freeze.vim
-	-rm -rf benchmark.out $(RM_ON_RUN)
-	# Sleep a moment to avoid that the xterm title is messed up.
-	# 200 msec is sufficient, but only modern sleep supports a fraction of
-	# a second, fall back to a second if it fails.
-	@-/bin/sh -c "sleep .2 > /dev/null 2>&1 || sleep 1"
-	$(RUN_VIM) $*.in $(REDIR_TEST_TO_NULL)
-	@/bin/sh -c "if test -f benchmark.out; then cat benchmark.out; fi"
-
 nolog:
 	-rm -f test.log messages
 
@@ -140,7 +154,7 @@ nolog:
 # New style of tests uses Vim script with assert calls.  These are easier
 # to write and a lot easier to read and debug.
 # Limitation: Only works with the +eval feature.
-RUN_VIMTEST = VIMRUNTIME=$(SCRIPTSOURCE); export VIMRUNTIME; $(VALGRIND) $(VIMPROG) -f $(GUI_FLAG) -u unix.vim
+RUN_VIMTEST = VIMRUNTIME=$(SCRIPTSOURCE) $(VALGRIND) $(VIMPROG) -f $(GUI_FLAG) -u unix.vim
 
 newtests: newtestssilent
 	@/bin/sh -c "if test -f messages && grep -q 'SKIPPED\|FAILED' messages; then cat messages; fi"
@@ -166,8 +180,17 @@ test_gui_init.res: test_gui_init.vim
 	$(RUN_VIMTEST) -u gui_preinit.vim -U gui_init.vim $(NO_PLUGINS) -S runtest.vim $<
 	@rm vimcmd
 
-opt_test.vim: ../option.c gen_opt_test.vim
-	$(VIMPROG) -u NONE -S gen_opt_test.vim --noplugin --not-a-term ../option.c
+opt_test.vim: ../optiondefs.h gen_opt_test.vim
+	$(VIMPROG) -u NONE -S gen_opt_test.vim --noplugin --not-a-term ../optiondefs.h
 
 test_xxd.res:
 	XXD=$(XXDPROG); export XXD; $(RUN_VIMTEST) $(NO_INITS) -S runtest.vim test_xxd.vim
+
+test_bench_regexp.res: test_bench_regexp.vim
+	-rm -rf benchmark.out $(RM_ON_RUN)
+	# Sleep a moment to avoid that the xterm title is messed up.
+	# 200 msec is sufficient, but only modern sleep supports a fraction of
+	# a second, fall back to a second if it fails.
+	@-/bin/sh -c "sleep .2 > /dev/null 2>&1 || sleep 1"
+	$(RUN_VIMTEST) $(NO_INITS) -S runtest.vim $*.vim $(REDIR_TEST_TO_NULL)
+	@/bin/sh -c "if test -f benchmark.out; then cat benchmark.out; fi"

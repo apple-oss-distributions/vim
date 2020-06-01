@@ -1,8 +1,11 @@
 " Tests for tabpage
 
 source screendump.vim
+source check.vim
 
 function Test_tabpage()
+  CheckFeature quickfix
+
   bw!
   " Simple test for opening and closing a tab page
   tabnew
@@ -34,7 +37,7 @@ function Test_tabpage()
   tabnew
   tabfirst
   call settabvar(2, 'val_num', 100)
-  call settabvar(2, 'val_str', 'SetTabVar test')
+  eval 'SetTabVar test'->settabvar(2, 'val_str')
   call settabvar(2, 'val_list', ['red', 'blue', 'green'])
   "
   call assert_true(gettabvar(2, 'val_num') == 100 && gettabvar(2, 'val_str') == 'SetTabVar test' && gettabvar(2, 'val_list') == ['red', 'blue', 'green'])
@@ -58,7 +61,7 @@ function Test_tabpage()
   q
   "
   "
-  " Test for ":tab drop multi-opend-file" to keep current tabpage and window.
+  " Test for ":tab drop multi-opened-file" to keep current tabpage and window.
   new test1
   tabnew
   new test1
@@ -127,6 +130,8 @@ function Test_tabpage()
   1tabmove
   call assert_equal(2, tabpagenr())
 
+  call assert_fails('let t = tabpagenr("#")', 'E15:')
+  call assert_equal(0, tabpagewinnr(-1))
   call assert_fails("99tabmove", 'E16:')
   call assert_fails("+99tabmove", 'E16:')
   call assert_fails("-99tabmove", 'E16:')
@@ -136,7 +141,11 @@ function Test_tabpage()
   call assert_fails("tabmove -99", 'E474:')
   call assert_fails("tabmove -3+", 'E474:')
   call assert_fails("tabmove $3", 'E474:')
+  call assert_fails("%tabonly", 'E16:')
   1tabonly!
+  tabnew
+  call assert_fails("-2tabmove", 'E474:')
+  tabonly!
 endfunc
 
 " Test autocommands
@@ -183,7 +192,7 @@ function Test_tabpage_with_autocmd()
   let s:li = split(join(map(copy(winr), 'gettabwinvar('.tabn.', v:val, "a")')), '\s\+')
   call assert_equal(['a', 'a'], s:li)
   let s:li = []
-  C call map(copy(winr), 'settabwinvar('.tabn.', v:val, ''a'', v:val*2)')
+  C call map(copy(winr), '(v:val*2)->settabwinvar(' .. tabn .. ', v:val, ''a'')')
   let s:li = split(join(map(copy(winr), 'gettabwinvar('.tabn.', v:val, "a")')), '\s\+')
   call assert_equal(['2', '4'], s:li)
 
@@ -219,7 +228,37 @@ function Test_tabpage_with_autocmd()
   1tabonly!
 endfunction
 
+" Test autocommands on tab drop
+function Test_tabpage_with_autocmd_tab_drop()
+  augroup TestTabpageGroup
+    au!
+    autocmd TabEnter * call add(s:li, 'TabEnter')
+    autocmd WinEnter * call add(s:li, 'WinEnter')
+    autocmd BufEnter * call add(s:li, 'BufEnter')
+    autocmd TabLeave * call add(s:li, 'TabLeave')
+    autocmd WinLeave * call add(s:li, 'WinLeave')
+    autocmd BufLeave * call add(s:li, 'BufLeave')
+  augroup END
+
+  let s:li = []
+  tab drop test1
+  call assert_equal(['BufLeave', 'BufEnter'], s:li)
+
+  let s:li = []
+  tab drop test2 test3
+  call assert_equal([
+        \ 'TabLeave', 'TabEnter', 'TabLeave', 'TabEnter',
+        \ 'TabLeave', 'WinEnter', 'TabEnter', 'BufEnter',
+        \ 'TabLeave', 'WinEnter', 'TabEnter', 'BufEnter'], s:li)
+
+  autocmd! TestTabpageGroup
+  augroup! TestTabpageGroup
+  1tabonly!
+endfunction
+
 function Test_tabpage_with_tab_modifier()
+  CheckFeature quickfix
+
   for n in range(4)
     tabedit
   endfor
@@ -555,7 +594,7 @@ endfunc
 
 func Test_tabpage_cmdheight()
   if !CanRunVimInTerminal()
-    throw 'Skipped: only works with terminal'
+    throw 'Skipped: cannot make screendumps'
   endif
   call writefile([
         \ 'set laststatus=2',
@@ -574,6 +613,16 @@ func Test_tabpage_cmdheight()
 
   call StopVimInTerminal(buf)
   call delete('XTest_tabpage_cmdheight')
+endfunc
+
+" Test for closing the tab page from a command window
+func Test_tabpage_close_cmdwin()
+  tabnew
+  call feedkeys("q/:tabclose\<CR>\<Esc>", 'xt')
+  call assert_equal(2, tabpagenr('$'))
+  call feedkeys("q/:tabonly\<CR>\<Esc>", 'xt')
+  call assert_equal(2, tabpagenr('$'))
+  tabonly
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

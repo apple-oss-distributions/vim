@@ -1,8 +1,7 @@
 " Test for syntax and syntax iskeyword option
 
-if !has("syntax")
-  finish
-endif
+source check.vim
+CheckFeature syntax
 
 source view_util.vim
 source screendump.vim
@@ -152,6 +151,10 @@ func Test_syntax_list()
   let a = execute('syntax list')
   call assert_equal("\nNo Syntax items defined for this buffer", a)
 
+  syntax keyword Type int containedin=g1 skipwhite skipempty skipnl nextgroup=Abc
+  let exp = "Type           xxx containedin=g1  nextgroup=Abc  skipnl skipwhite skipempty int"
+  call assert_equal(exp, split(execute("syntax list"), "\n")[1])
+
   bd
 endfunc
 
@@ -179,6 +182,11 @@ func Test_syntax_completion()
 
   call feedkeys(":syn match \<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_match('^"syn match Boolean Character ', @:)
+endfunc
+
+func Test_echohl_completion()
+  call feedkeys(":echohl no\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"echohl NonText Normal none', @:)
 endfunc
 
 func Test_syntax_arg_skipped()
@@ -316,6 +324,18 @@ func Test_syntax_arg_skipped()
   syn clear
 endfunc
 
+" Check for an error. Used when multiple errors are thrown and we are checking
+" for an earliest error.
+func AssertFails(cmd, errcode)
+  let save_exception = ''
+  try
+    exe a:cmd
+  catch
+    let save_exception = v:exception
+  endtry
+  call assert_match(a:errcode, save_exception)
+endfunc
+
 func Test_syntax_invalid_arg()
   call assert_fails('syntax case asdf', 'E390:')
   if has('conceal')
@@ -323,11 +343,49 @@ func Test_syntax_invalid_arg()
   endif
   call assert_fails('syntax spell asdf', 'E390:')
   call assert_fails('syntax clear @ABCD', 'E391:')
-  call assert_fails('syntax include @Xxx', 'E397:')
-  call assert_fails('syntax region X start="{"', 'E399:')
+  call assert_fails('syntax include random_file', 'E484:')
+  call assert_fails('syntax include <afile>', 'E495:')
   call assert_fails('syntax sync x', 'E404:')
   call assert_fails('syntax keyword Abc a[', 'E789:')
   call assert_fails('syntax keyword Abc a[bc]d', 'E890:')
+  call assert_fails('syntax cluster Abc add=A add=', 'E475:')
+
+  " Test for too many \z\( and unmatched \z\(
+  " Not able to use assert_fails() here because both E50:/E879: and E475:
+  " messages are emitted.
+  set regexpengine=1
+  call AssertFails("syntax region MyRegion start='\\z\\(' end='\\*/'", 'E52:')
+
+  let cmd = "syntax region MyRegion start='"
+  let cmd ..= repeat("\\z\\(.\\)", 10) .. "' end='\*/'"
+  call AssertFails(cmd, 'E50:')
+
+  set regexpengine=2
+  call AssertFails("syntax region MyRegion start='\\z\\(' end='\\*/'", 'E54:')
+
+  let cmd = "syntax region MyRegion start='"
+  let cmd ..= repeat("\\z\\(.\\)", 10) .. "' end='\*/'"
+  call AssertFails(cmd, 'E879:')
+  set regexpengine&
+
+  call AssertFails('syntax keyword cMyItem grouphere G1', 'E393:')
+  call AssertFails('syntax sync match Abc grouphere MyItem "abc"', 'E394:')
+  call AssertFails('syn keyword Type contains int', 'E395:')
+  call assert_fails('syntax include @Xxx', 'E397:')
+  call AssertFails('syntax region X start', 'E398:')
+  call assert_fails('syntax region X start="{"', 'E399:')
+  call AssertFails('syntax cluster contains=Abc', 'E400:')
+  call AssertFails("syntax match Character /'.'", 'E401:')
+  call AssertFails("syntax match Character /'.'/a", 'E402:')
+  call assert_fails('syntax sync linecont /pat', 'E404:')
+  call assert_fails('syntax sync linecont', 'E404:')
+  call assert_fails('syntax sync linecont /pat1/ linecont /pat2/', 'E403:')
+  call assert_fails('syntax sync minlines=a', 'E404:')
+  call AssertFails('syntax match ABC /x/ contains=', 'E406:')
+  call AssertFails("syntax match Character contains /'.'/", 'E405:')
+  call AssertFails('syntax match ccFoo "Foo" nextgroup=ALLBUT,F', 'E407:')
+  call AssertFails('syntax region Block start="{" contains=F,ALLBUT', 'E408:')
+  call AssertFails("syntax match Characters contains=a.*x /'.'/", 'E409:')
 endfunc
 
 func Test_syn_sync()
@@ -355,6 +413,7 @@ func Test_syn_clear()
   hi clear Foo
   call assert_equal('Foo', synIDattr(hlID("Foo"), "name"))
   hi clear Bar
+  call assert_fails('syntax clear invalid_syngroup', 'E28:')
 endfunc
 
 func Test_invalid_name()
@@ -394,7 +453,7 @@ endfunc
 
 func Test_ownsyntax_completion()
   call feedkeys(":ownsyntax java\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"ownsyntax java javacc javascript', @:)
+  call assert_equal('"ownsyntax java javacc javascript javascriptreact', @:)
 endfunc
 
 func Test_highlight_invalid_arg()
@@ -414,9 +473,8 @@ func Test_highlight_invalid_arg()
 endfunc
 
 func Test_bg_detection()
-  if has('gui_running')
-    return
-  endif
+  CheckNotGui
+
   " auto-detection of &bg, make sure sure it isn't set anywhere before
   " this test
   hi Normal ctermbg=0
@@ -504,6 +562,8 @@ func Test_conceal()
   call assert_match('16     ', ScreenLines(2, 7)[0])
   call assert_equal([[0, '', 0], [1, '', 1], [1, '', 1], [1, '', 2], [1, '', 2], [0, '', 0]], map(range(1, 6), 'synconcealed(2, v:val)'))
 
+  call AssertFails("syntax match Entity '&amp;' conceal cchar=\<Tab>", 'E844:')
+
   syn clear
   set conceallevel&
   bw!
@@ -518,8 +578,8 @@ func Test_synstack_synIDtrans()
   call assert_equal([], synstack(1, 1))
 
   norm f/
-  call assert_equal(['cComment', 'cCommentStart'], map(synstack(line("."), col(".")), 'synIDattr(v:val, "name")'))
-  call assert_equal(['Comment', 'Comment'],	   map(synstack(line("."), col(".")), 'synIDattr(synIDtrans(v:val), "name")'))
+  eval synstack(line("."), col("."))->map('synIDattr(v:val, "name")')->assert_equal(['cComment', 'cCommentStart'])
+  eval synstack(line("."), col("."))->map('synIDattr(synIDtrans(v:val), "name")')->assert_equal(['Comment', 'Comment'])
 
   norm fA
   call assert_equal(['cComment'], map(synstack(line("."), col(".")), 'synIDattr(v:val, "name")'))
@@ -529,6 +589,8 @@ func Test_synstack_synIDtrans()
   call assert_equal(['cComment', 'cTodo'], map(synstack(line("."), col(".")), 'synIDattr(v:val, "name")'))
   call assert_equal(['Comment', 'Todo'],   map(synstack(line("."), col(".")), 'synIDattr(synIDtrans(v:val), "name")'))
 
+  call assert_fails("let n=synIDtrans([])", 'E745:')
+
   syn clear
   bw!
 endfunc
@@ -536,13 +598,11 @@ endfunc
 " Check highlighting for a small piece of C code with a screen dump.
 func Test_syntax_c()
   if !CanRunVimInTerminal()
-    return
+    throw 'Skipped: cannot make screendumps'
   endif
   call writefile([
 	\ '/* comment line at the top */',
-	\ '  int',
-	\ 'main(int argc, char **argv)// another comment',
-	\ '{',
+	\ 'int main(int argc, char **argv) { // another comment',
 	\ '#if 0',
 	\ '   int   not_used;',
 	\ '#else',
@@ -551,12 +611,14 @@ func Test_syntax_c()
 	\ '   printf("Just an example piece of C code\n");',
 	\ '   return 0x0ff;',
 	\ '}',
+	\ "\t\t ",
 	\ '   static void',
 	\ 'myFunction(const double count, struct nothing, long there) {',
-	\ '  // 123: nothing to read here',
-	\ '  for (int i = 0; i < count; ++i) {',
-	\ '    break;',
-	\ '  }',
+	\ "\t// 123: nothing to endif here",
+	\ "\tfor (int i = 0; i < count; ++i) {",
+	\ "\t   break;",
+	\ "\t}",
+	\ "\tNote: asdf",
 	\ '}',
 	\ ], 'Xtest.c')
  
@@ -565,7 +627,14 @@ func Test_syntax_c()
   let $COLORFGBG = '15;0'
 
   let buf = RunVimInTerminal('Xtest.c', {})
+  call term_sendkeys(buf, ":syn keyword Search Note\r")
+  call term_sendkeys(buf, ":syn match Error /^\\s\\+$/\r")
+  call term_sendkeys(buf, ":set hlsearch\r")
+  call term_sendkeys(buf, "/endif\r")
+  call term_sendkeys(buf, "vjfC")
   call VerifyScreenDump(buf, 'Test_syntax_c_01', {})
+
+  call term_sendkeys(buf, "\<Esc>")
   call StopVimInTerminal(buf)
 
   let $COLORFGBG = ''
@@ -583,3 +652,43 @@ func Test_syn_wrong_z_one()
   call test_override("ALL", 0)
   bwipe!
 endfunc
+
+func Test_syntax_after_bufdo()
+  call writefile(['/* aaa comment */'], 'Xaaa.c')
+  call writefile(['/* bbb comment */'], 'Xbbb.c')
+  call writefile(['/* ccc comment */'], 'Xccc.c')
+  call writefile(['/* ddd comment */'], 'Xddd.c')
+
+  let bnr = bufnr('%')
+  new Xaaa.c
+  badd Xbbb.c
+  badd Xccc.c
+  badd Xddd.c
+  exe "bwipe " . bnr
+  let l = []
+  bufdo call add(l, bufnr('%'))
+  call assert_equal(4, len(l))
+
+  syntax on
+
+  " This used to only enable syntax HL in the last buffer.
+  bufdo tab split
+  tabrewind
+  for tab in range(1, 4)
+    norm fm
+    call assert_equal(['cComment'], map(synstack(line("."), col(".")), 'synIDattr(v:val, "name")'))
+    tabnext
+  endfor
+
+  bwipe! Xaaa.c
+  bwipe! Xbbb.c
+  bwipe! Xccc.c
+  bwipe! Xddd.c
+  syntax off
+  call delete('Xaaa.c')
+  call delete('Xbbb.c')
+  call delete('Xccc.c')
+  call delete('Xddd.c')
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab

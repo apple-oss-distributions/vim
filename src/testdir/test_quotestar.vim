@@ -1,11 +1,9 @@
 " *-register (quotestar) tests
 
 source shared.vim
-if !WorkingClipboard()
-  finish
-endif
+source check.vim
 
-source shared.vim
+CheckFeature clipboard_working
 
 func Do_test_quotestar_for_macunix()
   if empty(exepath('pbcopy')) || empty(exepath('pbpaste'))
@@ -109,7 +107,8 @@ func Do_test_quotestar_for_x11()
       call remote_send(name, ":gui -f\<CR>")
     endif
     " Wait for the server in the GUI to be up and answering requests.
-    call WaitForAssert({-> assert_match("1", remote_expr(name, "has('gui_running')", "", 1))})
+    " On some systems and with valgrind this can be very slow.
+    call WaitForAssert({-> assert_match("1", remote_expr(name, "has('gui_running')", "", 1))}, 10000)
 
     call remote_send(name, ":let @* = 'maybe'\<CR>")
     call WaitForAssert({-> assert_equal("maybe", remote_expr(name, "@*", "", 2))})

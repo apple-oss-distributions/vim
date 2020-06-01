@@ -39,13 +39,18 @@ Unicode true
 # Uncomment the next line if you want to include VisVim extension:
 #!define HAVE_VIS_VIM
 
-# Comment the following line to create a multilanguage installer:
+# Comment the following line to create an English-only installer:
 !define HAVE_MULTI_LANG
 
 # Uncomment the next line if you want to create a 64-bit installer.
 #!define WIN64
 
 !include gvim_version.nsh	# for version number
+
+# Definition of Patch for Vim
+!ifndef PATCHLEVEL
+  !define PATCHLEVEL 0
+!endif
 
 # ----------- No configurable settings below this line -----------
 
@@ -171,8 +176,19 @@ Page custom SetCustom ValidateCustom
     !include "lang\japanese.nsi"
     !include "lang\simpchinese.nsi"
     !include "lang\tradchinese.nsi"
+    !include "lang\turkish.nsi"
 !endif
 
+##########################################################
+# Version resources
+
+VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductName" "Vim"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "CompanyName" "Vim Developers"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalTrademarks" "Vim"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "Copyright (C) 1996"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "FileDescription" "Vi Improved - A Text Editor"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "FileVersion" "${VER_MAJOR}.${VER_MINOR}.${PATCHLEVEL}.0"
+VIProductVersion "${VER_MAJOR}.${VER_MINOR}.${PATCHLEVEL}.0"
 
 # Global variables
 Var vim_dialog
@@ -326,13 +342,13 @@ Section "$(str_section_exe)" id_section_exe
 	File ${VIMSRC}\vim${BIT}.dll
 !endif
 	File /oname=install.exe ${VIMSRC}\installw32.exe
-	File /oname=uninstal.exe ${VIMSRC}\uninstalw32.exe
+	File /oname=uninstall.exe ${VIMSRC}\uninstallw32.exe
 	File ${VIMSRC}\vimrun.exe
 	File /oname=tee.exe ${VIMSRC}\teew32.exe
 	File /oname=xxd.exe ${VIMSRC}\xxdw32.exe
 	File ..\vimtutor.bat
 	File ..\README.txt
-	File ..\uninstal.txt
+	File ..\uninstall.txt
 	File ${VIMRT}\*.vim
 	File ${VIMRT}\rgb.txt
 
@@ -940,7 +956,7 @@ Section "un.$(str_unsection_register)" id_unsection_register
 
 	# delete the context menu entry and batch files
 	DetailPrint "$(str_msg_unregistering)"
-	nsExec::Exec "$0\uninstal.exe -nsis"
+	nsExec::Exec "$0\uninstall.exe -nsis"
 	Pop $3
 
 	# We may have been put to the background when uninstall did something.

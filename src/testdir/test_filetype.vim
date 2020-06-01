@@ -44,8 +44,10 @@ endfunc
 
 " Filetypes detected just from matching the file name.
 let s:filename_checks = {
+    \ '8th': ['file.8th'],
     \ 'a2ps': ['/etc/a2ps.cfg', '/etc/a2ps/file.cfg', 'a2psrc', '.a2psrc'],
     \ 'a65': ['file.a65'],
+    \ 'aap': ['file.aap'],
     \ 'abap': ['file.abap'],
     \ 'abc': ['file.abc'],
     \ 'abel': ['file.abl'],
@@ -56,7 +58,8 @@ let s:filename_checks = {
     \ 'aml': ['file.aml'],
     \ 'ampl': ['file.run'],
     \ 'ant': ['build.xml'],
-    \ 'apache': ['.htaccess', '/etc/httpd/file.conf'],
+    \ 'apache': ['.htaccess', '/etc/httpd/file.conf', '/etc/apache2/sites-2/file.com', '/etc/apache2/some.config', '/etc/apache2/conf.file/conf', '/etc/apache2/mods-some/file', '/etc/apache2/sites-some/file', '/etc/httpd/conf.d/file.config'],
+    \ 'apachestyle': ['/etc/proftpd/file.config,/etc/proftpd/conf.file/file'],
     \ 'applescript': ['file.scpt'],
     \ 'aptconf': ['apt.conf', '/.aptitude/config'],
     \ 'arch': ['.arch-inventory'],
@@ -76,12 +79,13 @@ let s:filename_checks = {
     \ 'bib': ['file.bib'],
     \ 'bindzone': ['named.root'],
     \ 'blank': ['file.bl'],
+    \ 'bsdl': ['file.bsd', 'file.bsdl'],
     \ 'bst': ['file.bst'],
     \ 'bzr': ['bzr_log.any'],
     \ 'c': ['enlightenment/file.cfg', 'file.qc', 'file.c'],
     \ 'cabal': ['file.cabal'],
     \ 'calendar': ['calendar'],
-    \ 'catalog': ['catalog'],
+    \ 'catalog': ['catalog', 'sgml.catalogfile'],
     \ 'cdl': ['file.cdl'],
     \ 'cdrdaoconf': ['/etc/cdrdao.conf', '/etc/defaults/cdrdao', '/etc/default/cdrdao', '.cdrdao'],
     \ 'cdrtoc': ['file.toc'],
@@ -119,6 +123,7 @@ let s:filename_checks = {
     \ 'cvs': ['cvs123'],
     \ 'cvsrc': ['.cvsrc'],
     \ 'cynpp': ['file.cyn'],
+    \ 'dart': ['file.dart', 'file.drt'],
     \ 'datascript': ['file.ds'],
     \ 'dcd': ['file.dcd'],
     \ 'debcontrol': ['/debian/control'],
@@ -132,10 +137,10 @@ let s:filename_checks = {
     \ 'diff': ['file.diff', 'file.rej'],
     \ 'dircolors': ['.dir_colors', '.dircolors', '/etc/DIR_COLORS'],
     \ 'dnsmasq': ['/etc/dnsmasq.conf'],
-    \ 'dockerfile': ['Dockerfile', 'file.Dockerfile'],
+    \ 'dockerfile': ['Containerfile', 'Dockerfile', 'file.Dockerfile'],
     \ 'dosbatch': ['file.bat', 'file.sys'],
     \ 'dosini': ['.editorconfig', '/etc/yum.conf', 'file.ini'],
-    \ 'dot': ['file.dot'],
+    \ 'dot': ['file.dot', 'file.gv'],
     \ 'dracula': ['file.drac', 'file.drc', 'filelvs', 'filelpe'],
     \ 'dsl': ['file.dsl'],
     \ 'dtd': ['file.dtd'],
@@ -146,6 +151,7 @@ let s:filename_checks = {
     \ 'ecd': ['file.ecd'],
     \ 'edif': ['file.edf', 'file.edif', 'file.edo'],
     \ 'elinks': ['/etc/elinks.conf', '/.elinks/elinks.conf'],
+    \ 'elm': ['file.elm'],
     \ 'elmfilt': ['filter-rules'],
     \ 'erlang': ['file.erl', 'file.hrl', 'file.yaws'],
     \ 'eruby': ['file.erb', 'file.rhtml'],
@@ -198,6 +204,7 @@ let s:filename_checks = {
     \ 'hex': ['file.hex', 'file.h32'],
     \ 'hgcommit': ['hg-editor-file.txt'],
     \ 'hog': ['file.hog', 'snort.conf', 'vision.conf'],
+    \ 'hollywood': ['file.hws'],
     \ 'hostconf': ['/etc/host.conf'],
     \ 'hostsaccess': ['/etc/hosts.allow', '/etc/hosts.deny'],
     \ 'template': ['file.tmpl'],
@@ -218,7 +225,8 @@ let s:filename_checks = {
     \ 'jam': ['file.jpl', 'file.jpr'],
     \ 'java': ['file.java', 'file.jav'],
     \ 'javacc': ['file.jj', 'file.jjt'],
-    \ 'javascript': ['file.js', 'file.javascript', 'file.es', 'file.jsx', 'file.mjs'],
+    \ 'javascript': ['file.js', 'file.javascript', 'file.es', 'file.mjs', 'file.cjs'],
+    \ 'javascriptreact': ['file.jsx'],
     \ 'jess': ['file.clp'],
     \ 'jgraph': ['file.jgr'],
     \ 'jovial': ['file.jov', 'file.j73', 'file.jovial'],
@@ -228,6 +236,7 @@ let s:filename_checks = {
     \ 'kconfig': ['Kconfig', 'Kconfig.debug'],
     \ 'kivy': ['file.kv'],
     \ 'kix': ['file.kix'],
+    \ 'kotlin': ['file.kt', 'file.ktm', 'file.kts'],
     \ 'kscript': ['file.ks'],
     \ 'kwt': ['file.k'],
     \ 'lace': ['file.ace', 'file.ACE'],
@@ -270,6 +279,7 @@ let s:filename_checks = {
     \ 'mason': ['file.mason', 'file.mhtml', 'file.comp'],
     \ 'master': ['file.mas', 'file.master'],
     \ 'mel': ['file.mel'],
+    \ 'meson': ['meson.build', 'meson_options.txt'],
     \ 'messages': ['/log/auth', '/log/cron', '/log/daemon', '/log/debug', '/log/kern', '/log/lpr', '/log/mail', '/log/messages', '/log/news/news', '/log/syslog', '/log/user',
     \     '/log/auth.log', '/log/cron.log', '/log/daemon.log', '/log/debug.log', '/log/kern.log', '/log/lpr.log', '/log/mail.log', '/log/messages.log', '/log/news/news.log', '/log/syslog.log', '/log/user.log',
     \     '/log/auth.err', '/log/cron.err', '/log/daemon.err', '/log/debug.err', '/log/kern.err', '/log/lpr.err', '/log/mail.err', '/log/messages.err', '/log/news/news.err', '/log/syslog.err', '/log/user.err',
@@ -313,6 +323,7 @@ let s:filename_checks = {
     \ 'openroad': ['file.or'],
     \ 'ora': ['file.ora'],
     \ 'pamconf': ['/etc/pam.conf'],
+    \ 'pamenv': ['/etc/security/pam_env.conf', '/home/user/.pam_environment'],
     \ 'papp': ['file.papp', 'file.pxml', 'file.pxsl'],
     \ 'pascal': ['file.pas', 'file.dpr'],
     \ 'passwd': ['any/etc/passwd', 'any/etc/passwd-', 'any/etc/passwd.edit', 'any/etc/shadow', 'any/etc/shadow-', 'any/etc/shadow.edit', 'any/var/backups/passwd.bak', 'any/var/backups/shadow.bak'],
@@ -358,6 +369,7 @@ let s:filename_checks = {
     \ 'rcs': ['file,v'],
     \ 'readline': ['.inputrc', 'inputrc'],
     \ 'remind': ['.reminders', 'file.remind', 'file.rem'],
+    \ 'rego': ['file.rego'],
     \ 'resolv': ['resolv.conf'],
     \ 'reva': ['file.frt'],
     \ 'rexx': ['file.rex', 'file.orx', 'file.rxo', 'file.rxj', 'file.jrexx', 'file.rexxj', 'file.rexx', 'file.testGroup', 'file.testUnit'],
@@ -424,8 +436,11 @@ let s:filename_checks = {
     \ 'sudoers': ['any/etc/sudoers', 'sudoers.tmp'],
     \ 'svg': ['file.svg'],
     \ 'svn': ['svn-commitfile.tmp'],
+    \ 'swift': ['file.swift'],
+    \ 'swiftgyb': ['file.swift.gyb'],
+    \ 'sil': ['file.sil'],
     \ 'sysctl': ['/etc/sysctl.conf', '/etc/sysctl.d/file.conf'],
-    \ 'systemd': ['any/systemd/file.automount', 'any/systemd/file.mount', 'any/systemd/file.path', 'any/systemd/file.service', 'any/systemd/file.socket', 'any/systemd/file.swap', 'any/systemd/file.target', 'any/systemd/file.timer'],
+    \ 'systemd': ['any/systemd/file.automount', 'any/systemd/file.mount', 'any/systemd/file.path', 'any/systemd/file.service', 'any/systemd/file.socket', 'any/systemd/file.swap', 'any/systemd/file.target', 'any/systemd/file.timer', '/etc/systemd/system/some.d/file.conf', '/etc/systemd/system/some.d/.#file', '/etc/systemd/system/.#otherfile', '/home/user/.config/systemd/user/some.d/mine.conf', '/home/user/.config/systemd/user/some.d/.#file', '/home/user/.config/systemd/user/.#otherfile'],
     \ 'systemverilog': ['file.sv', 'file.svh'],
     \ 'tags': ['tags'],
     \ 'tak': ['file.tak'],
@@ -452,6 +467,7 @@ let s:filename_checks = {
     \ 'tssop': ['file.tssop'],
     \ 'twig': ['file.twig'],
     \ 'typescript': ['file.ts'],
+    \ 'typescriptreact': ['file.tsx'],
     \ 'uc': ['file.uc'],
     \ 'udevconf': ['/etc/udev/udev.conf'],
     \ 'udevperm': ['/etc/udev/permissions.d/file.permissions'],
@@ -468,13 +484,14 @@ let s:filename_checks = {
     \ 'verilog': ['file.v'],
     \ 'verilogams': ['file.va', 'file.vams'],
     \ 'vgrindefs': ['vgrindefs'],
-    \ 'vhdl': ['file.hdl', 'file.vhd', 'file.vhdl', 'file.vbe', 'file.vst'],
+    \ 'vhdl': ['file.hdl', 'file.vhd', 'file.vhdl', 'file.vbe', 'file.vst', 'file.vhdl_123', 'file.vho'],
     \ 'vim': ['file.vim', 'file.vba', '.exrc', '_exrc'],
     \ 'viminfo': ['.viminfo', '_viminfo'],
     \ 'vmasm': ['file.mar'],
     \ 'voscm': ['file.cm'],
     \ 'vrml': ['file.wrl'],
     \ 'vroom': ['file.vroom'],
+    \ 'vue': ['file.vue'],
     \ 'wast': ['file.wast', 'file.wat'],
     \ 'webmacro': ['file.wm'],
     \ 'wget': ['.wgetrc', 'wgetrc'],
@@ -502,7 +519,6 @@ let s:filename_checks = {
     \ 'zimbutempl': ['file.zut'],
     \ 'zsh': ['.zprofile', '/etc/zprofile', '.zfbfmarks', 'file.zsh'],
     \
-    \ 'aap': ['file.aap'],
     \ 'help': [$VIMRUNTIME . '/doc/help.txt'],
     \ 'xpm': ['file.xpm'],
     \ }
@@ -516,11 +532,15 @@ func CheckItems(checks)
     for i in range(0, len(names) - 1)
       new
       try
-        exe 'edit ' . names[i]
+        exe 'edit ' . fnameescape(names[i])
       catch
-	call assert_report('cannot edit "' . names[i] . '": ' . v:errmsg)
+	call assert_report('cannot edit "' . names[i] . '": ' . v:exception)
       endtry
-      call assert_equal(ft, &filetype, 'with file name: ' . names[i])
+      if &filetype == '' && &readonly
+	" File exists but not able to edit it (permission denied)
+      else
+	call assert_equal(ft, &filetype, 'with file name: ' . names[i])
+      endif
       bwipe!
     endfor
   endfor
@@ -582,6 +602,9 @@ let s:script_checks = {
       \ 'cfengine': [['#!/path/cfengine']],
       \ 'erlang': [['#!/path/escript']],
       \ 'haskell': [['#!/path/haskell']],
+      \ 'cpp': [['// Standard iostream objects -*- C++ -*-'],
+      \         ['// -*- C++ -*-']],
+      \ 'yaml': [['%YAML 1.2']],
       \ }
 
 func Test_script_detection()
@@ -600,5 +623,31 @@ endfunc
 
 func Test_setfiletype_completion()
   call feedkeys(":setfiletype java\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"setfiletype java javacc javascript', @:)
+  call assert_equal('"setfiletype java javacc javascript javascriptreact', @:)
 endfunc
+
+" Test for ':filetype detect' command for a buffer without a file
+func Test_emptybuf_ftdetect()
+  new
+  call setline(1, '#!/bin/sh')
+  call assert_equal('', &filetype)
+  filetype detect
+  call assert_equal('sh', &filetype)
+  close!
+endfunc
+
+" Test for ':filetype indent on' and ':filetype indent off' commands
+func Test_filetype_indent_off()
+  new Xtest.vim
+  filetype indent on
+  call assert_equal(1, g:did_indent_on)
+  call assert_equal(['filetype detection:ON  plugin:OFF  indent:ON'],
+        \ execute('filetype')->split("\n"))
+  filetype indent off
+  call assert_equal(0, exists('g:did_indent_on'))
+  call assert_equal(['filetype detection:ON  plugin:OFF  indent:OFF'],
+        \ execute('filetype')->split("\n"))
+  close
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab

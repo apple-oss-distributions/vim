@@ -1,4 +1,6 @@
-" Tests for the writefile() function.
+" Tests for the writefile() function and some :write commands.
+
+source check.vim
 
 func Test_writefile()
   let f = tempname()
@@ -14,6 +16,13 @@ func Test_writefile()
   call assert_equal("morning", l[3])
   call assert_equal("vimmers", l[4])
   call delete(f)
+
+  call assert_fails('call writefile("text", "Xfile")', 'E475: Invalid argument: writefile() first argument must be a List or a Blob')
+endfunc
+
+func Test_writefile_ignore_regexp_error()
+  write Xt[z-a]est.txt
+  call delete('Xt[z-a]est.txt')
 endfunc
 
 func Test_writefile_fails_gently()
@@ -36,18 +45,42 @@ func Test_writefile_fails_conversion()
   if !has('iconv') || has('sun')
     return
   endif
-  set nobackup nowritebackup
+  " Without a backup file the write won't happen if there is a conversion
+  " error.
+  set nobackup nowritebackup backupdir=. backupskip=
   new
   let contents = ["line one", "line two"]
   call writefile(contents, 'Xfile')
   edit Xfile
   call setline(1, ["first line", "cannot convert \u010b", "third line"])
-  call assert_fails('write ++enc=cp932')
+  call assert_fails('write ++enc=cp932', 'E513:')
   call assert_equal(contents, readfile('Xfile'))
 
   call delete('Xfile')
   bwipe!
-  set backup& writebackup&
+  set backup& writebackup& backupdir&vim backupskip&vim
+endfunc
+
+func Test_writefile_fails_conversion2()
+  if !has('iconv') || has('sun')
+    return
+  endif
+  " With a backup file the write happens even if there is a conversion error,
+  " but then the backup file must remain
+  set nobackup writebackup backupdir=. backupskip=
+  let contents = ["line one", "line two"]
+  call writefile(contents, 'Xfile_conversion_err')
+  edit Xfile_conversion_err
+  call setline(1, ["first line", "cannot convert \u010b", "third line"])
+  set fileencoding=latin1
+  let output = execute('write')
+  call assert_match('CONVERSION ERROR', output)
+  call assert_equal(contents, readfile('Xfile_conversion_err~'))
+
+  call delete('Xfile_conversion_err')
+  call delete('Xfile_conversion_err~')
+  bwipe!
+  set backup& writebackup& backupdir&vim backupskip&vim
 endfunc
 
 func SetFlag(timer)
@@ -150,3 +183,80 @@ func Test_writefile_autowrite_nowrite()
   bwipe!
   set noautowrite
 endfunc
+
+" Test for ':w !<cmd>' to pipe lines from the current buffer to an external
+" command.
+func Test_write_pipe_to_cmd()
+  CheckUnix
+  new
+  call setline(1, ['L1', 'L2', 'L3', 'L4'])
+  2,3w !cat > Xfile
+  call assert_equal(['L2', 'L3'], readfile('Xfile'))
+  close!
+  call delete('Xfile')
+endfunc
+
+" Test for :saveas
+func Test_saveas()
+  call assert_fails('saveas', 'E471:')
+  call writefile(['L1'], 'Xfile')
+  new Xfile
+  new
+  call setline(1, ['L1'])
+  call assert_fails('saveas Xfile', 'E139:')
+  close!
+  enew | only
+  call delete('Xfile')
+
+  call writefile(test_null_list(), 'Xfile')
+  call assert_false(filereadable('Xfile'))
+  call writefile(test_null_blob(), 'Xfile')
+  call assert_false(filereadable('Xfile'))
+  call assert_fails('call writefile([], "")', 'E482:')
+endfunc
+
+func Test_write_errors()
+  " Test for writing partial buffer
+  call writefile(['L1', 'L2', 'L3'], 'Xfile')
+  new Xfile
+  call assert_fails('1,2write', 'E140:')
+  close!
+
+  call assert_fails('w > Xtest', 'E494:')
+ 
+  " Try to overwrite a directory
+  if has('unix')
+    call mkdir('Xdir1')
+    call assert_fails('write Xdir1', 'E17:')
+    call delete('Xdir1', 'd')
+  endif
+
+  " Test for :wall for a buffer with no name
+  enew | only
+  call setline(1, ['L1'])
+  call assert_fails('wall', 'E141:')
+  enew!
+
+  " Test for writing a 'readonly' file
+  new Xfile
+  set readonly
+  call assert_fails('write', 'E45:')
+  close
+
+  " Test for writing to a read-only file
+  new Xfile
+  call setfperm('Xfile', 'r--r--r--')
+  call assert_fails('write', 'E505:')
+  call setfperm('Xfile', 'rw-rw-rw-')
+  close
+
+  call delete('Xfile')
+
+  call writefile(test_null_list(), 'Xfile')
+  call assert_false(filereadable('Xfile'))
+  call writefile(test_null_blob(), 'Xfile')
+  call assert_false(filereadable('Xfile'))
+  call assert_fails('call writefile([], "")', 'E482:')
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab

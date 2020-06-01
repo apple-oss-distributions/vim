@@ -63,7 +63,7 @@ endfunc
 
 func Test_detect_ambiwidth()
   if !CanRunVimInTerminal()
-    return
+    throw 'Skipped: cannot run Vim in a terminal window'
   endif
 
   " Use the title termcap entries to output the escape sequence.
@@ -74,7 +74,7 @@ func Test_detect_ambiwidth()
 	\ 'redraw',
 	\ ], 'Xscript')
   let buf = RunVimInTerminal('-S Xscript', {})
-  call term_wait(buf)
+  call TermWait(buf)
   call term_sendkeys(buf, "S\<C-R>=&ambiwidth\<CR>\<Esc>")
   call WaitForAssert({-> assert_match('single', term_getline(buf, 1))})
 

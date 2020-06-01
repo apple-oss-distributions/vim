@@ -1,12 +1,11 @@
 " Test for breakindent
 "
 " Note: if you get strange failures when adding new tests, it might be that
-" while the test is run, the breakindent cacheing gets in its way.
+" while the test is run, the breakindent caching gets in its way.
 " It helps to change the tabstop setting and force a redraw (e.g. see
 " Test_breakindent08())
-if !exists('+breakindent')
-  finish
-endif
+source check.vim
+CheckOption breakindent
 
 source view_util.vim
 
@@ -63,7 +62,8 @@ endfunc
 
 func Test_breakindent02()
   " simple breakindent test with showbreak set
-  call s:test_windows('setl briopt=min:0 sbr=>>')
+  set sbr=>>
+  call s:test_windows('setl briopt=min:0 sbr=')
   let lines = s:screen_lines(line('.'),8)
   let expect = [
 	\ "    abcd",
@@ -123,7 +123,8 @@ endfunc
 
 func Test_breakindent04()
   " breakindent set with min width 18
-  call s:test_windows('setl sbr= briopt=min:18')
+  set sbr=<<<
+  call s:test_windows('setl sbr=NONE briopt=min:18')
   let lines = s:screen_lines(line('.'),8)
   let expect = [
 	\ "    abcd",
@@ -133,6 +134,7 @@ func Test_breakindent04()
   call s:compare_lines(expect, lines)
   " clean up
   call s:close_windows('set sbr=')
+  set sbr=
 endfunc
 
 func Test_breakindent04_vartabs()
@@ -412,9 +414,10 @@ func Test_breakindent11()
   " test strdisplaywidth()
   call s:test_windows('setl cpo-=n sbr=>> nu nuw=4 nolist briopt= ts=4')
   let text = getline(2)
-  let width = strlen(text[1:])+indent(2)+strlen(&sbr)*3 " text wraps 3 times
+  let width = strlen(text[1:]) + indent(2) + strlen(&sbr) * 3 " text wraps 3 times
   call assert_equal(width, strdisplaywidth(text))
   call s:close_windows('set sbr=')
+  call assert_equal(4, strdisplaywidth("\t", 4))
 endfunc
 
 func Test_breakindent11_vartabs()
@@ -424,8 +427,8 @@ func Test_breakindent11_vartabs()
   " test strdisplaywidth()
   call s:test_windows('setl cpo-=n sbr=>> nu nuw=4 nolist briopt= ts=4 vts=4')
   let text = getline(2)
-  let width = strlen(text[1:])+indent(2)+strlen(&sbr)*3 " text wraps 3 times
-  call assert_equal(width, strdisplaywidth(text))
+  let width = strlen(text[1:]) + 2->indent() + strlen(&sbr) * 3 " text wraps 3 times
+  call assert_equal(width, text->strdisplaywidth())
   call s:close_windows('set sbr= vts&')
 endfunc
 
@@ -615,3 +618,129 @@ func Test_breakindent16_vartabs()
   call s:compare_lines(expect, lines)
   call s:close_windows('set vts&')
 endfunc
+
+func Test_breakindent17_vartabs()
+  if !has("vartabs")
+    return
+  endif
+  let s:input = ""
+  call s:test_windows('setl breakindent list listchars=tab:<-> showbreak=+++')
+  call setline(1, "\t" . repeat('a', 63))
+  vert resize 30
+  norm! 1gg$
+  redraw!
+  let lines = s:screen_lines(1, 30)
+  let expect = [
+	\ "<-->aaaaaaaaaaaaaaaaaaaaaaaaaa",
+	\ "    +++aaaaaaaaaaaaaaaaaaaaaaa",
+	\ "    +++aaaaaaaaaaaaaa         ",
+	\ ]
+  call s:compare_lines(expect, lines)
+  call s:close_windows('set breakindent& list& listchars& showbreak&')
+endfunc
+
+func Test_breakindent18_vartabs()
+  if !has("vartabs")
+    return
+  endif
+  let s:input = ""
+  call s:test_windows('setl breakindent list listchars=tab:<->')
+  call setline(1, "\t" . repeat('a', 63))
+  vert resize 30
+  norm! 1gg$
+  redraw!
+  let lines = s:screen_lines(1, 30)
+  let expect = [
+	\ "<-->aaaaaaaaaaaaaaaaaaaaaaaaaa",
+	\ "    aaaaaaaaaaaaaaaaaaaaaaaaaa",
+	\ "    aaaaaaaaaaa               ",
+	\ ]
+  call s:compare_lines(expect, lines)
+  call s:close_windows('set breakindent& list& listchars&')
+endfunc
+
+func Test_breakindent19_sbr_nextpage()
+  let s:input = ""
+  call s:test_windows('setl breakindent briopt=shift:2,sbr,min:18 sbr=>')
+  call setline(1, repeat('a', 200))
+  norm! 1gg
+  redraw!
+  let lines = s:screen_lines(1, 20)
+  let expect = [
+	\ "aaaaaaaaaaaaaaaaaaaa",
+	\ "> aaaaaaaaaaaaaaaaaa",
+	\ "> aaaaaaaaaaaaaaaaaa",
+	\ ]
+  call s:compare_lines(expect, lines)
+  " Scroll down one screen line
+  setl scrolloff=5
+  norm! 5gj
+  redraw!
+  let lines = s:screen_lines(1, 20)
+  let expect = [
+	\ "> aaaaaaaaaaaaaaaaaa",
+	\ "> aaaaaaaaaaaaaaaaaa",
+	\ "> aaaaaaaaaaaaaaaaaa",
+	\ ]
+  call s:compare_lines(expect, lines)
+
+  setl breakindent briopt=min:18 sbr=>
+  norm! 5gj
+  let lines = s:screen_lines(1, 20)
+  let expect = [
+	\ ">aaaaaaaaaaaaaaaaaaa",
+	\ ">aaaaaaaaaaaaaaaaaaa",
+	\ ">aaaaaaaaaaaaaaaaaaa",
+	\ ]
+  call s:compare_lines(expect, lines)
+  call s:close_windows('set breakindent& briopt& sbr&')
+endfunc
+
+func Test_breakindent20_cpo_n_nextpage()
+  let s:input = ""
+  call s:test_windows('setl breakindent briopt=min:14 cpo+=n number')
+  call setline(1, repeat('a', 200))
+  norm! 1gg
+  redraw!
+  let lines = s:screen_lines(1, 20)
+  let expect = [
+	\ "  1 aaaaaaaaaaaaaaaa",
+	\ "    aaaaaaaaaaaaaaaa",
+	\ "    aaaaaaaaaaaaaaaa",
+	\ ]
+  call s:compare_lines(expect, lines)
+  " Scroll down one screen line
+  setl scrolloff=5
+  norm! 5gj
+  redraw!
+  let lines = s:screen_lines(1, 20)
+  let expect = [
+	\ "--1 aaaaaaaaaaaaaaaa",
+	\ "    aaaaaaaaaaaaaaaa",
+	\ "    aaaaaaaaaaaaaaaa",
+	\ ]
+  call s:compare_lines(expect, lines)
+
+  setl briopt+=shift:2
+  norm! 1gg
+  let lines = s:screen_lines(1, 20)
+  let expect = [
+	\ "  1 aaaaaaaaaaaaaaaa",
+	\ "      aaaaaaaaaaaaaa",
+	\ "      aaaaaaaaaaaaaa",
+	\ ]
+  call s:compare_lines(expect, lines)
+  " Scroll down one screen line
+  norm! 5gj
+  let lines = s:screen_lines(1, 20)
+  let expect = [
+	\ "--1   aaaaaaaaaaaaaa",
+	\ "      aaaaaaaaaaaaaa",
+	\ "      aaaaaaaaaaaaaa",
+	\ ]
+  call s:compare_lines(expect, lines)
+
+  call s:close_windows('set breakindent& briopt& cpo& number&')
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab

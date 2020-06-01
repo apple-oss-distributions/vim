@@ -1,8 +1,7 @@
 " Tests for encryption.
 
-if !has('cryptv')
-  finish
-endif
+source check.vim
+CheckFeature cryptv
 
 func Common_head_only(text)
   " This was crashing Vim
@@ -111,3 +110,29 @@ func Test_crypt_key_mismatch()
   bwipe!
 endfunc
 
+func Test_crypt_set_key_changes_buffer()
+
+  new Xtest1.txt
+  call setline(1, 'nothing')
+  set cryptmethod=blowfish2
+  call feedkeys(":X\<CR>foobar\<CR>foobar\<CR>", 'xt')
+  call assert_fails(":q", "E37:")
+  w
+  set key=anotherkey
+  call assert_fails(":bw")
+  w
+  call feedkeys(":X\<CR>foobar\<CR>foobar\<CR>", 'xt')
+  call assert_fails(":bw")
+  w
+  let winnr = winnr()
+  wincmd p
+  call setwinvar(winnr, '&key', 'yetanotherkey')
+  wincmd p
+  call assert_fails(":bw")
+  w
+
+  set cryptmethod&
+  set key=
+  bwipe!
+  call delete('Xtest1.txt')
+endfunc

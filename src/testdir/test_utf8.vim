@@ -17,9 +17,11 @@ func Test_strchars()
   let exp = [[1, 1, 1], [3, 3, 3], [2, 2, 1], [3, 3, 1], [1, 1, 1]]
   for i in range(len(inp))
     call assert_equal(exp[i][0], strchars(inp[i]))
-    call assert_equal(exp[i][1], strchars(inp[i], 0))
+    call assert_equal(exp[i][1], inp[i]->strchars(0))
     call assert_equal(exp[i][2], strchars(inp[i], 1))
   endfor
+  call assert_fails("let v=strchars('abc', [])", 'E474:')
+  call assert_fails("let v=strchars('abc', 2)", 'E474:')
 endfunc
 
 " Test for customlist completion
@@ -77,7 +79,7 @@ func Test_list2str_str2list_utf8()
   let s = "\u304b\u3099\u3044"
   let l = [0x304b, 0x3099, 0x3044]
   call assert_equal(l, str2list(s, 1))
-  call assert_equal(s, list2str(l, 1))
+  call assert_equal(s, l->list2str(1))
   if &enc ==# 'utf-8'
     call assert_equal(str2list(s), str2list(s, 1))
     call assert_equal(list2str(l), list2str(l, 1))
@@ -99,6 +101,10 @@ func Test_list2str_str2list_latin1()
   
   let lres = str2list(s, 1)
   let sres = list2str(l, 1)
+  call assert_equal([65, 66, 67], str2list("ABC"))
+
+  " Try converting a list to a string in latin-1 encoding
+  call assert_equal([1, 2, 3], str2list(list2str([1, 2, 3])))
 
   let &encoding = save_encoding
   call assert_equal(l, lres)
@@ -112,7 +118,7 @@ func Test_screenchar_utf8()
   call setline(1, ["ABC\u0308"])
   redraw
   call assert_equal([0x0041], screenchars(1, 1))
-  call assert_equal([0x0042], screenchars(1, 2))
+  call assert_equal([0x0042], 1->screenchars(2))
   call assert_equal([0x0043, 0x0308], screenchars(1, 3))
   call assert_equal("A", screenstring(1, 1))
   call assert_equal("B", screenstring(1, 2))
@@ -138,3 +144,5 @@ func Test_screenchar_utf8()
 
   bwipe!
 endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab

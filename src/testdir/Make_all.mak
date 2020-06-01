@@ -13,22 +13,10 @@ SCRIPTS_FIRST = \
 
 # Tests that run on all systems.
 SCRIPTS_ALL = \
-	test3.out \
-	test29.out \
-	test37.out \
-	test39.out \
 	test42.out \
 	test44.out \
-	test48.out \
-	test64.out \
-	test69.out \
 	test70.out \
-	test88.out \
-	test94.out \
-	test95.out \
-	test99.out \
-	test_eval.out
-
+	test99.out
 
 # Tests that run on most systems, but not on Amiga.
 SCRIPTS_MORE1 = \
@@ -44,10 +32,7 @@ SCRIPTS_MORE2 = \
 
 # Tests that run on most systems, but not on VMS
 SCRIPTS_MORE4 = \
-	test30.out \
-	test59.out \
-	test72.out \
-
+	test59.out
 
 # Tests specifically for MS-Windows.
 SCRIPTS_WIN32 =
@@ -56,23 +41,39 @@ SCRIPTS_WIN32 =
 # Tests for the GUI.
 SCRIPTS_GUI =
 
+# Tests for Vim9 script.
+TEST_VIM9 = \
+	test_vim9_cmd \
+	test_vim9_disassemble \
+	test_vim9_expr \
+	test_vim9_func \
+	test_vim9_script
+
+TEST_VIM9_RES = \
+	test_vim9_cmd.res \
+	test_vim9_disassemble.res \
+	test_vim9_expr.res \
+	test_vim9_func.res \
+	test_vim9_script.res
+
 # Individual tests, including the ones part of test_alot.
 # Please keep sorted up to test_alot.
 NEW_TESTS = \
 	test_arabic \
 	test_arglist \
 	test_assert \
-	test_assign \
 	test_autochdir \
 	test_autocmd \
 	test_autoload \
 	test_backspace_opt \
 	test_backup \
 	test_balloon \
+	test_balloon_gui \
 	test_behave \
 	test_blob \
 	test_blockedit \
 	test_breakindent \
+	test_buffer \
 	test_bufline \
 	test_bufwintabinfo \
 	test_cd \
@@ -91,9 +92,11 @@ NEW_TESTS = \
 	test_comparators \
 	test_compiler \
 	test_conceal \
+	test_const \
 	test_crypt \
 	test_cscope \
 	test_cursor_func \
+	test_cursorline \
 	test_curswant \
 	test_debugger \
 	test_delete \
@@ -101,13 +104,15 @@ NEW_TESTS = \
 	test_digraph \
 	test_display \
 	test_edit \
+	test_environ \
 	test_erasebackword \
 	test_escaped_glob \
 	test_eval_stuff \
-	test_environ \
 	test_ex_equal \
+	test_ex_mode \
 	test_ex_undo \
 	test_ex_z \
+	test_excmd \
 	test_exec_while_if \
 	test_execute_func \
 	test_exists \
@@ -154,7 +159,9 @@ NEW_TESTS = \
 	test_iminsert \
 	test_increment \
 	test_increment_dbcs \
+	test_indent \
 	test_ins_complete \
+	test_interrupt \
 	test_job_fails \
 	test_join \
 	test_json \
@@ -168,6 +175,7 @@ NEW_TESTS = \
 	test_lispwords \
 	test_listchars \
 	test_listdict \
+	test_listener \
 	test_listlbr \
 	test_listlbr_utf8 \
 	test_lua \
@@ -182,8 +190,10 @@ NEW_TESTS = \
 	test_memory_usage \
 	test_menu \
 	test_messages \
+	test_method \
 	test_mksession \
 	test_mksession_utf8 \
+	test_modeless \
 	test_modeline \
 	test_move \
 	test_nested_function \
@@ -197,6 +207,8 @@ NEW_TESTS = \
 	test_perl \
 	test_plus_arg_edit \
 	test_popup \
+	test_popupwin \
+	test_popupwin_textprop \
 	test_preview \
 	test_profile \
 	test_prompt_buffer \
@@ -207,6 +219,7 @@ NEW_TESTS = \
 	test_pyx3 \
 	test_quickfix \
 	test_quotestar \
+	test_random \
 	test_recover \
 	test_regex_char_classes \
 	test_regexp_latin \
@@ -223,16 +236,20 @@ NEW_TESTS = \
 	test_search \
 	test_search_stat \
 	test_searchpos \
+	test_selectmode \
 	test_set \
 	test_sha256 \
+	test_shift \
 	test_shortpathname \
 	test_signals \
 	test_signs \
 	test_smartindent \
 	test_sort \
+	test_sound \
 	test_source \
 	test_source_utf8 \
 	test_spell \
+	test_spellfile \
 	test_startup \
 	test_startup_utf8 \
 	test_stat \
@@ -251,8 +268,8 @@ NEW_TESTS = \
 	test_tagjump \
 	test_taglist \
 	test_tcl \
-	test_termencoding \
 	test_termcodes \
+	test_termencoding \
 	test_terminal \
 	test_terminal_fail \
 	test_textformat \
@@ -260,6 +277,7 @@ NEW_TESTS = \
 	test_textprop \
 	test_timers \
 	test_true_false \
+	test_trycatch \
 	test_undo \
 	test_unlet \
 	test_user_func \
@@ -267,6 +285,8 @@ NEW_TESTS = \
 	test_utf8 \
 	test_utf8_comparisons \
 	test_vartabs \
+	test_version \
+	$(TEST_VIM9) \
 	test_viminfo \
 	test_vimscript \
 	test_virtualedit \
@@ -297,11 +317,16 @@ NEW_TESTS_RES = \
 	test_autoload.res \
 	test_backspace_opt.res \
 	test_balloon.res \
+	test_balloon_gui.res \
 	test_blob.res \
 	test_blockedit.res \
 	test_breakindent.res \
+	test_buffer.res \
+	test_bufline.res \
 	test_bufwintabinfo.res \
+	test_cd.res \
 	test_cdo.res \
+	test_changedtick.res \
 	test_changelist.res \
 	test_channel.res \
 	test_charsearch.res \
@@ -313,10 +338,14 @@ NEW_TESTS_RES = \
 	test_command_count.res \
 	test_comparators.res \
 	test_conceal.res \
+	test_const.res \
 	test_crypt.res \
 	test_cscope.res \
+	test_cursor_func.res \
+	test_cursorline.res \
 	test_curswant.res \
 	test_debugger.res \
+	test_delete.res \
 	test_diffmode.res \
 	test_digraph.res \
 	test_display.res \
@@ -325,24 +354,36 @@ NEW_TESTS_RES = \
 	test_erasebackword.res \
 	test_escaped_glob.res \
 	test_eval_stuff.res \
+	test_excmd.res \
 	test_exec_while_if.res \
+	test_execute_func.res \
 	test_exists.res \
 	test_exists_autocmd.res \
 	test_exit.res \
+	test_expr.res \
 	test_file_size.res \
 	test_filechanged.res \
+	test_fileformat.res \
+	test_filetype.res \
+	test_filter_cmd.res \
+	test_filter_map.res \
 	test_find_complete.res \
+	test_findfile.res \
 	test_fixeol.res \
+	test_float_func.res \
 	test_fnameescape.res \
 	test_fold.res \
+	test_functions.res \
 	test_getcwd.res \
 	test_getvar.res \
 	test_gf.res \
 	test_gn.res \
+	test_goto.res \
 	test_gui.res \
 	test_gui_init.res \
 	test_hardcopy.res \
 	test_help.res \
+	test_help_tagjump.res \
 	test_hide.res \
 	test_highlight.res \
 	test_history.res \
@@ -350,33 +391,50 @@ NEW_TESTS_RES = \
 	test_iminsert.res \
 	test_increment.res \
 	test_increment_dbcs.res \
+	test_indent.res \
 	test_ins_complete.res \
+	test_interrupt.res \
 	test_job_fails.res \
+	test_join.res \
 	test_json.res \
 	test_jumplist.res \
+	test_lambda.res \
 	test_langmap.res \
 	test_let.res \
 	test_lineending.res \
 	test_listchars.res \
 	test_listdict.res \
+	test_listener.res \
 	test_listlbr.res \
 	test_lua.res \
 	test_makeencoding.res \
 	test_man.res \
 	test_maparg.res \
+	test_mapping.res \
 	test_marks.res \
+	test_match.res \
 	test_matchadd_conceal.res \
+	test_matchadd_conceal_utf8.res \
 	test_memory_usage.res \
+	test_menu.res \
+	test_messages.res \
+	test_method.res \
 	test_mksession.res \
+	test_modeless.res \
+	test_modeline.res \
 	test_nested_function.res \
 	test_netbeans.res \
 	test_normal.res \
 	test_number.res \
 	test_options.res \
 	test_packadd.res \
+	test_partial.res \
 	test_paste.res \
 	test_perl.res \
 	test_plus_arg_edit.res \
+	test_popup.res \
+	test_popupwin.res \
+	test_popupwin_textprop.res \
 	test_preview.res \
 	test_profile.res \
 	test_prompt_buffer.res \
@@ -386,8 +444,10 @@ NEW_TESTS_RES = \
 	test_pyx3.res \
 	test_quickfix.res \
 	test_quotestar.res \
+	test_random.res \
 	test_regex_char_classes.res \
 	test_registers.res \
+	test_rename.res \
 	test_restricted.res \
 	test_retab.res \
 	test_ruby.res \
@@ -395,36 +455,52 @@ NEW_TESTS_RES = \
 	test_scrollbind.res \
 	test_search.res \
 	test_search_stat.res \
+	test_selectmode.res \
 	test_shortpathname.res \
 	test_signals.res \
 	test_signs.res \
 	test_smartindent.res \
+	test_sort.res \
+	test_sound.res \
 	test_source.res \
 	test_spell.res \
+	test_spellfile.res \
 	test_startup.res \
 	test_stat.res \
+	test_statusline.res \
 	test_substitute.res \
+	test_suspend.res \
 	test_swap.res \
+	test_syn_attr.res \
 	test_syntax.res \
 	test_system.res \
 	test_tab.res \
+	test_tabpage.res \
+	test_tagjump.res \
+	test_taglist.res \
 	test_tcl.res \
-	test_termencoding.res \
 	test_termcodes.res \
+	test_termencoding.res \
 	test_terminal.res \
 	test_terminal_fail.res \
 	test_textformat.res \
 	test_textobjects.res \
 	test_textprop.res \
+	test_timers.res \
+	test_true_false.res \
+	test_trycatch.res \
 	test_undo.res \
 	test_user_func.res \
 	test_usercommands.res \
 	test_vartabs.res \
+	$(TEST_VIM9_RES) \
 	test_viminfo.res \
 	test_vimscript.res \
+	test_virtualedit.res \
 	test_visual.res \
 	test_winbar.res \
 	test_winbuf_close.res \
+	test_window_cmd.res \
 	test_window_id.res \
 	test_windows_home.res \
 	test_wordcount.res \

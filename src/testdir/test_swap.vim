@@ -1,5 +1,9 @@
 " Tests for the swap feature
 
+source check.vim
+source shared.vim
+source term_util.vim
+
 func s:swapname()
   return trim(execute('swapname'))
 endfunc
@@ -111,7 +115,7 @@ func Test_swapinfo()
   w
   let fname = s:swapname()
   call assert_match('Xswapinfo', fname)
-  let info = swapinfo(fname)
+  let info = fname->swapinfo()
 
   let ver = printf('VIM %d.%d', v:version / 100, v:version % 100)
   call assert_equal(ver, info.version)
@@ -153,7 +157,7 @@ func Test_swapname()
   let buf = bufnr('%')
   let expected = s:swapname()
   wincmd p
-  call assert_equal(expected, swapname(buf))
+  call assert_equal(expected, buf->swapname())
 
   new Xtest3
   setlocal noswapfile
@@ -196,14 +200,17 @@ func Test_swapfile_delete()
   quit
   call assert_equal(fnamemodify(swapfile_name, ':t'), fnamemodify(s:swapname, ':t'))
 
-  " Write the swapfile with a modified PID, now it will be automatically
-  " deleted. Process one should never be Vim.
-  let swapfile_bytes[24:27] = 0z01000000
-  call writefile(swapfile_bytes, swapfile_name)
-  let s:swapname = ''
-  split XswapfileText
-  quit
-  call assert_equal('', s:swapname)
+  " This test won't work as root because root can successfully run kill(1, 0)
+  if !IsRoot()
+    " Write the swapfile with a modified PID, now it will be automatically
+    " deleted. Process one should never be Vim.
+    let swapfile_bytes[24:27] = 0z01000000
+    call writefile(swapfile_bytes, swapfile_name)
+    let s:swapname = ''
+    split XswapfileText
+    quit
+    call assert_equal('', s:swapname)
+  endif
 
   " Now set the modified flag, the swap file will not be deleted
   let swapfile_bytes[28 + 80 + 899] = 0x55
@@ -220,3 +227,154 @@ func Test_swapfile_delete()
   augroup END
   augroup! test_swapfile_delete
 endfunc
+
+func Test_swap_recover()
+  autocmd! SwapExists
+  augroup test_swap_recover
+    autocmd!
+    autocmd SwapExists * let v:swapchoice = 'r'
+  augroup END
+
+
+  call mkdir('Xswap')
+  let $Xswap = 'foo'  " Check for issue #4369.
+  set dir=Xswap//
+  " Create a valid swapfile by editing a file.
+  split Xswap/text
+  call setline(1, ['one', 'two', 'three'])
+  write  " file is written, not modified
+  " read the swapfile as a Blob
+  let swapfile_name = swapname('%')
+  let swapfile_bytes = readfile(swapfile_name, 'B')
+
+  " Close the file and recreate the swap file.
+  quit
+  call writefile(swapfile_bytes, swapfile_name)
+  " Edit the file again. This triggers recovery.
+  try
+    split Xswap/text
+  catch
+    " E308 should be caught, not E305.
+    call assert_exception('E308:')  " Original file may have been changed
+  endtry
+  " The file should be recovered.
+  call assert_equal(['one', 'two', 'three'], getline(1, 3))
+  quit!
+
+  call delete('Xswap/text')
+  call delete(swapfile_name)
+  call delete('Xswap', 'd')
+  unlet $Xswap
+  set dir&
+  augroup test_swap_recover
+    autocmd!
+  augroup END
+  augroup! test_swap_recover
+endfunc
+
+func Test_swap_recover_ext()
+  autocmd! SwapExists
+  augroup test_swap_recover_ext
+    autocmd!
+    autocmd SwapExists * let v:swapchoice = 'r'
+  augroup END
+
+  " Create a valid swapfile by editing a file with a special extension.
+  split Xtest.scr
+  call setline(1, ['one', 'two', 'three'])
+  write  " file is written, not modified
+  write  " write again to make sure the swapfile is created
+  " read the swapfile as a Blob
+  let swapfile_name = swapname('%')
+  let swapfile_bytes = readfile(swapfile_name, 'B')
+
+  " Close and delete the file and recreate the swap file.
+  quit
+  call delete('Xtest.scr')
+  call writefile(swapfile_bytes, swapfile_name)
+  " Edit the file again. This triggers recovery.
+  try
+    split Xtest.scr
+  catch
+    " E308 should be caught, not E306.
+    call assert_exception('E308:')  " Original file may have been changed
+  endtry
+  " The file should be recovered.
+  call assert_equal(['one', 'two', 'three'], getline(1, 3))
+  quit!
+
+  call delete('Xtest.scr')
+  call delete(swapfile_name)
+  augroup test_swap_recover_ext
+    autocmd!
+  augroup END
+  augroup! test_swap_recover_ext
+endfunc
+
+" Test for closing a split window automatically when a swap file is detected
+" and 'Q' is selected in the confirmation prompt.
+func Test_swap_split_win()
+  autocmd! SwapExists
+  augroup test_swap_splitwin
+    autocmd!
+    autocmd SwapExists * let v:swapchoice = 'q'
+  augroup END
+
+  " Create a valid swapfile by editing a file with a special extension.
+  split Xtest.scr
+  call setline(1, ['one', 'two', 'three'])
+  write  " file is written, not modified
+  write  " write again to make sure the swapfile is created
+  " read the swapfile as a Blob
+  let swapfile_name = swapname('%')
+  let swapfile_bytes = readfile(swapfile_name, 'B')
+
+  " Close and delete the file and recreate the swap file.
+  quit
+  call delete('Xtest.scr')
+  call writefile(swapfile_bytes, swapfile_name)
+  " Split edit the file again. This should fail to open the window
+  try
+    split Xtest.scr
+  catch
+    " E308 should be caught, not E306.
+    call assert_exception('E308:')  " Original file may have been changed
+  endtry
+  call assert_equal(1, winnr('$'))
+
+  call delete('Xtest.scr')
+  call delete(swapfile_name)
+
+  augroup test_swap_splitwin
+      autocmd!
+  augroup END
+  augroup! test_swap_splitwin
+endfunc
+
+" Test for selecting 'q' in the attention prompt
+func Test_swap_prompt_splitwin()
+  CheckRunVimInTerminal
+
+  call writefile(['foo bar'], 'Xfile1')
+  edit Xfile1
+  preserve  " should help to make sure the swap file exists
+
+  let buf = RunVimInTerminal('', {'rows': 20})
+  call term_sendkeys(buf, ":set nomore\n")
+  call term_sendkeys(buf, ":set noruler\n")
+  call term_sendkeys(buf, ":split Xfile1\n")
+  call TermWait(buf)
+  call WaitForAssert({-> assert_match('^\[O\]pen Read-Only, (E)dit anyway, (R)ecover, (Q)uit, (A)bort: $', term_getline(buf, 20))})
+  call term_sendkeys(buf, "q")
+  call TermWait(buf)
+  call term_sendkeys(buf, ":\<CR>")
+  call WaitForAssert({-> assert_match('^:$', term_getline(buf, 20))})
+  call term_sendkeys(buf, ":echomsg winnr('$')\<CR>")
+  call TermWait(buf)
+  call WaitForAssert({-> assert_match('^1$', term_getline(buf, 20))})
+  call StopVimInTerminal(buf)
+  %bwipe!
+  call delete('Xfile1')
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab

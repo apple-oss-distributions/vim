@@ -1,11 +1,10 @@
 " Tests for the Tcl interface.
 
-if !has('tcl')
-  finish
-end
+source check.vim
+CheckFeature tcl
 
 " Helper function as there is no builtin tcleval() function similar
-" to perleval, luaevel(), pyeval(), etc.
+" to perleval, luaeval(), pyeval(), etc.
 func TclEval(tcl_expr)
   let s = split(execute('tcl ' . a:tcl_expr), "\n")
   return (len(s) == 0) ? '' : s[-1]
@@ -68,11 +67,11 @@ func Test_vim_buffer()
   " Test ::vim::buffer list
   call assert_equal('2',    TclEval('llength [::vim::buffer list]'))
   call assert_equal(b1.' '.b2, TclEval('::vim::buffer list'))
-  tcl <<EOF
+  tcl << trim EOF
     proc eachbuf { cmd } {
       foreach b [::vim::buffer list] { $b command $cmd }
     }
-EOF
+  EOF
   tcl eachbuf %s/foo/FOO/g
   b! Xfoo1
   call assert_equal(['FOObar'], getline(1, '$'))
@@ -654,6 +653,9 @@ endfunc
 
 " Test exiting current Tcl interpreter and re-creating one.
 func Test_tcl_exit()
+  call assert_fails('tcl exit 1 1', 'wrong # args: should be "exit ?returnCode?"')
+  call assert_fails('tcl exit x', 'expected integer but got "x"')
+
   tcl set foo "foo"
   call assert_fails('tcl exit 3', 'E572: exit code 3')
 
@@ -678,3 +680,22 @@ func Test_set_cursor()
   normal j
   call assert_equal([2, 5], [line('.'), col('.')])
 endfunc
+
+" Test for different syntax for ruby heredoc
+func Test_tcl_heredoc()
+  tcl << END
+::vim::command {let s = "A"}
+END
+  tcl <<
+::vim::command {let s ..= "B"}
+.
+  tcl << trim END
+    ::vim::command {let s ..= "C"}
+  END
+  tcl << trim
+    ::vim::command {let s ..= "D"}
+  .
+  call assert_equal('ABCD', s)
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab

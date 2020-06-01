@@ -1,8 +1,7 @@
 " Tests for Perl interface
 
-if !has('perl')
-  finish
-end
+source check.vim
+CheckFeature perl
 
 " FIXME: RunTest don't see any error when Perl abort...
 perl $SIG{__WARN__} = sub { die "Unexpected warnings from perl: @_" };
@@ -31,7 +30,7 @@ endfunc
 
 funct Test_VIM_Blob()
   call assert_equal('0z',         perleval('VIM::Blob("")'))
-  call assert_equal('0z31326162', perleval('VIM::Blob("12ab")'))
+  call assert_equal('0z31326162', 'VIM::Blob("12ab")'->perleval())
   call assert_equal('0z00010203', perleval('VIM::Blob("\x00\x01\x02\x03")'))
   call assert_equal('0z8081FEFF', perleval('VIM::Blob("\x80\x81\xfe\xff")'))
 endfunc
@@ -220,11 +219,11 @@ endfunc
 
 func Test_stdio()
   redir =>l:out
-  perl <<EOF
+  perl << trim EOF
     VIM::Msg("&VIM::Msg");
     print "STDOUT";
     print STDERR "STDERR";
-EOF
+  EOF
   redir END
   call assert_equal(['&VIM::Msg', 'STDOUT', 'STDERR'], split(l:out, "\n"))
 endfunc
@@ -291,3 +290,25 @@ func Test_set_cursor()
   normal j
   call assert_equal([2, 6], [line('.'), col('.')])
 endfunc
+
+" Test for various heredoc syntax
+func Test_perl_heredoc()
+  perl << END
+VIM::DoCommand('let s = "A"')
+END
+  perl <<
+VIM::DoCommand('let s ..= "B"')
+.
+  perl << trim END
+    VIM::DoCommand('let s ..= "C"')
+  END
+  perl << trim
+    VIM::DoCommand('let s ..= "D"')
+  .
+  perl << trim eof
+    VIM::DoCommand('let s ..= "E"')
+  eof
+  call assert_equal('ABCDE', s)
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab

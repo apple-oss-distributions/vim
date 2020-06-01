@@ -22,7 +22,7 @@
     blob_T *
 blob_alloc(void)
 {
-    blob_T *blob = (blob_T *)alloc_clear(sizeof(blob_T));
+    blob_T *blob = ALLOC_CLEAR_ONE(blob_T);
 
     if (blob != NULL)
 	ga_init2(&blob->bv_ga, 1, 100);
@@ -58,23 +58,24 @@ rettv_blob_set(typval_T *rettv, blob_T *b)
 }
 
     int
-blob_copy(typval_T *from, typval_T *to)
+blob_copy(blob_T *from, typval_T *to)
 {
     int	    ret = OK;
 
     to->v_type = VAR_BLOB;
-    if (from->vval.v_blob == NULL)
+    to->v_lock = 0;
+    if (from == NULL)
 	to->vval.v_blob = NULL;
     else if (rettv_blob_alloc(to) == FAIL)
 	ret = FAIL;
     else
     {
-	int  len = from->vval.v_blob->bv_ga.ga_len;
+	int  len = from->bv_ga.ga_len;
 
 	if (len > 0)
 	{
 	    to->vval.v_blob->bv_ga.ga_data =
-			    vim_memsave(from->vval.v_blob->bv_ga.ga_data, len);
+					 vim_memsave(from->bv_ga.ga_data, len);
 	    if (to->vval.v_blob->bv_ga.ga_data == NULL)
 		len = 0;
 	}
@@ -257,4 +258,74 @@ failed:
     return NULL;
 }
 
-#endif /* defined(FEAT_EVAL) */
+/*
+ * "remove({blob})" function
+ */
+    void
+blob_remove(typval_T *argvars, typval_T *rettv)
+{
+    int		error = FALSE;
+    long	idx = (long)tv_get_number_chk(&argvars[1], &error);
+    long	end;
+
+    if (!error)
+    {
+	blob_T  *b = argvars[0].vval.v_blob;
+	int	len = blob_len(b);
+	char_u  *p;
+
+	if (idx < 0)
+	    // count from the end
+	    idx = len + idx;
+	if (idx < 0 || idx >= len)
+	{
+	    semsg(_(e_blobidx), idx);
+	    return;
+	}
+	if (argvars[2].v_type == VAR_UNKNOWN)
+	{
+	    // Remove one item, return its value.
+	    p = (char_u *)b->bv_ga.ga_data;
+	    rettv->vval.v_number = (varnumber_T) *(p + idx);
+	    mch_memmove(p + idx, p + idx + 1, (size_t)len - idx - 1);
+	    --b->bv_ga.ga_len;
+	}
+	else
+	{
+	    blob_T  *blob;
+
+	    // Remove range of items, return list with values.
+	    end = (long)tv_get_number_chk(&argvars[2], &error);
+	    if (error)
+		return;
+	    if (end < 0)
+		// count from the end
+		end = len + end;
+	    if (end >= len || idx > end)
+	    {
+		semsg(_(e_blobidx), end);
+		return;
+	    }
+	    blob = blob_alloc();
+	    if (blob == NULL)
+		return;
+	    blob->bv_ga.ga_len = end - idx + 1;
+	    if (ga_grow(&blob->bv_ga, end - idx + 1) == FAIL)
+	    {
+		vim_free(blob);
+		return;
+	    }
+	    p = (char_u *)b->bv_ga.ga_data;
+	    mch_memmove((char_u *)blob->bv_ga.ga_data, p + idx,
+						  (size_t)(end - idx + 1));
+	    ++blob->bv_refcount;
+	    rettv->v_type = VAR_BLOB;
+	    rettv->vval.v_blob = blob;
+
+	    mch_memmove(p + idx, p + end + 1, (size_t)(len - end));
+	    b->bv_ga.ga_len -= end - idx + 1;
+	}
+    }
+}
+
+#endif // defined(FEAT_EVAL)
