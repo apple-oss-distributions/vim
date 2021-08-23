@@ -169,30 +169,20 @@ init_tv(typval_T *varp)
 	CLEAR_POINTER(varp);
 }
 
-/*
- * Get the number value of a variable.
- * If it is a String variable, uses vim_str2nr().
- * For incompatible types, return 0.
- * tv_get_number_chk() is similar to tv_get_number(), but informs the
- * caller of incompatible types: it sets *denote to TRUE if "denote"
- * is not NULL or returns -1 otherwise.
- */
-    varnumber_T
-tv_get_number(typval_T *varp)
-{
-    int		error = FALSE;
-
-    return tv_get_number_chk(varp, &error);	// return 0L on error
-}
-
-    varnumber_T
-tv_get_number_chk(typval_T *varp, int *denote)
+    static varnumber_T
+tv_get_bool_or_number_chk(typval_T *varp, int *denote, int want_bool)
 {
     varnumber_T	n = 0L;
 
     switch (varp->v_type)
     {
 	case VAR_NUMBER:
+	    if (in_vim9script() && want_bool && varp->vval.v_number != 0
+						   && varp->vval.v_number != 1)
+	    {
+		semsg(_(e_using_number_as_bool_nr), varp->vval.v_number);
+		break;
+	    }
 	    return varp->vval.v_number;
 	case VAR_FLOAT:
 #ifdef FEAT_FLOAT
@@ -204,6 +194,11 @@ tv_get_number_chk(typval_T *varp, int *denote)
 	    emsg(_("E703: Using a Funcref as a Number"));
 	    break;
 	case VAR_STRING:
+	    if (in_vim9script())
+	    {
+		emsg_using_string_as(varp, !want_bool);
+		break;
+	    }
 	    if (varp->vval.v_string != NULL)
 		vim_str2nr(varp->vval.v_string, NULL, NULL,
 					    STR2NR_ALL, &n, NULL, 0, FALSE);
@@ -216,6 +211,14 @@ tv_get_number_chk(typval_T *varp, int *denote)
 	    break;
 	case VAR_BOOL:
 	case VAR_SPECIAL:
+	    if (!want_bool && in_vim9script())
+	    {
+		if (varp->v_type == VAR_BOOL)
+		    emsg(_(e_using_bool_as_number));
+		else
+		    emsg(_("E611: Using a Special as a Number"));
+		break;
+	    }
 	    return varp->vval.v_number == VVAL_TRUE ? 1 : 0;
 	case VAR_JOB:
 #ifdef FEAT_JOB_CHANNEL
@@ -241,6 +244,48 @@ tv_get_number_chk(typval_T *varp, int *denote)
     else
 	*denote = TRUE;
     return n;
+}
+
+/*
+ * Get the number value of a variable.
+ * If it is a String variable, uses vim_str2nr().
+ * For incompatible types, return 0.
+ * tv_get_number_chk() is similar to tv_get_number(), but informs the
+ * caller of incompatible types: it sets *denote to TRUE if "denote"
+ * is not NULL or returns -1 otherwise.
+ */
+    varnumber_T
+tv_get_number(typval_T *varp)
+{
+    int		error = FALSE;
+
+    return tv_get_number_chk(varp, &error);	// return 0L on error
+}
+
+    varnumber_T
+tv_get_number_chk(typval_T *varp, int *denote)
+{
+    return tv_get_bool_or_number_chk(varp, denote, FALSE);
+}
+
+/*
+ * Get the boolean value of "varp".  This is like tv_get_number_chk(),
+ * but in Vim9 script accepts Number (0 and 1) and Bool/Special.
+ */
+    varnumber_T
+tv_get_bool(typval_T *varp)
+{
+    return tv_get_bool_or_number_chk(varp, NULL, TRUE);
+}
+
+/*
+ * Get the boolean value of "varp".  This is like tv_get_number_chk(),
+ * but in Vim9 script accepts Number and Bool.
+ */
+    varnumber_T
+tv_get_bool_chk(typval_T *varp, int *denote)
+{
+    return tv_get_bool_or_number_chk(varp, denote, TRUE);
 }
 
 #ifdef FEAT_FLOAT
@@ -296,6 +341,42 @@ tv_get_float(typval_T *varp)
 #endif
 
 /*
+ * Give an error and return FAIL unless "tv" is a string.
+ */
+    int
+check_for_string_arg(typval_T *args, int idx)
+{
+    if (args[idx].v_type != VAR_STRING)
+    {
+	if (idx >= 0)
+	    semsg(_(e_string_required_for_argument_nr), idx + 1);
+	else
+	    emsg(_(e_stringreq));
+	return FAIL;
+    }
+    return OK;
+}
+
+/*
+ * Give an error and return FAIL unless "args[idx]" is a non-empty string.
+ */
+    int
+check_for_nonempty_string_arg(typval_T *args, int idx)
+{
+    if (check_for_string_arg(args, idx) == FAIL)
+	return FAIL;
+    if (args[idx].vval.v_string == NULL || *args[idx].vval.v_string == NUL)
+    {
+	if (idx >= 0)
+	    semsg(_(e_non_empty_string_required_for_argument_nr), idx + 1);
+	else
+	    emsg(_(e_non_empty_string_required));
+	return FAIL;
+    }
+    return OK;
+}
+
+/*
  * Get the string value of a variable.
  * If it is a Number variable, the number is converted into a string.
  * tv_get_string() uses a single, static buffer.  YOU CAN ONLY USE IT ONCE!
@@ -311,6 +392,19 @@ tv_get_string(typval_T *varp)
     static char_u   mybuf[NUMBUFLEN];
 
     return tv_get_string_buf(varp, mybuf);
+}
+
+/*
+ * Like tv_get_string() but don't allow number to string conversion for Vim9.
+ */
+    char_u *
+tv_get_string_strict(typval_T *varp)
+{
+    static char_u   mybuf[NUMBUFLEN];
+    char_u	    *res =  tv_get_string_buf_chk_strict(
+						 varp, mybuf, in_vim9script());
+
+    return res != NULL ? res : (char_u *)"";
 }
 
     char_u *
@@ -335,9 +429,20 @@ tv_get_string_chk(typval_T *varp)
     char_u *
 tv_get_string_buf_chk(typval_T *varp, char_u *buf)
 {
+    return tv_get_string_buf_chk_strict(varp, buf, FALSE);
+}
+
+    char_u *
+tv_get_string_buf_chk_strict(typval_T *varp, char_u *buf, int strict)
+{
     switch (varp->v_type)
     {
 	case VAR_NUMBER:
+	    if (strict)
+	    {
+		emsg(_(e_using_number_as_string));
+		break;
+	    }
 	    vim_snprintf((char *)buf, NUMBUFLEN, "%lld",
 					    (varnumber_T)varp->vval.v_number);
 	    return buf;
@@ -470,8 +575,8 @@ tv_check_lock(typval_T *tv, char_u *name, int use_gettext)
 	default:
 	    break;
     }
-    return var_check_lock(tv->v_lock, name, use_gettext)
-		    || (lock != 0 && var_check_lock(lock, name, use_gettext));
+    return value_check_lock(tv->v_lock, name, use_gettext)
+		   || (lock != 0 && value_check_lock(lock, name, use_gettext));
 }
 
 /*
@@ -574,7 +679,7 @@ copy_tv(typval_T *from, typval_T *to)
 typval_compare(
     typval_T	*typ1,   // first operand
     typval_T	*typ2,   // second operand
-    exptype_T	type,    // operator
+    exprtype_T	type,    // operator
     int		ic)      // ignore case
 {
     int		i;
@@ -759,6 +864,30 @@ typval_compare(
 	    default:  break;  // avoid gcc warning
 	}
     }
+    else if (in_vim9script() && (typ1->v_type == VAR_BOOL
+						 || typ2->v_type == VAR_BOOL))
+    {
+	if (typ1->v_type != typ2->v_type)
+	{
+	    semsg(_(e_cannot_compare_str_with_str),
+		       vartype_name(typ1->v_type), vartype_name(typ2->v_type));
+	    clear_tv(typ1);
+	    return FAIL;
+	}
+	n1 = typ1->vval.v_number;
+	n2 = typ2->vval.v_number;
+	switch (type)
+	{
+	    case EXPR_IS:
+	    case EXPR_EQUAL:    n1 = (n1 == n2); break;
+	    case EXPR_ISNOT:
+	    case EXPR_NEQUAL:   n1 = (n1 != n2); break;
+	    default:
+		emsg(_(e_invalid_operation_for_bool));
+		clear_tv(typ1);
+		return FAIL;
+	}
+    }
     else
     {
 	s1 = tv_get_string_buf(typ1, buf1);
@@ -790,14 +919,27 @@ typval_compare(
 	}
     }
     clear_tv(typ1);
-    typ1->v_type = VAR_NUMBER;
-    typ1->vval.v_number = n1;
+    if (in_vim9script())
+    {
+	typ1->v_type = VAR_BOOL;
+	typ1->vval.v_number = n1 ? VVAL_TRUE : VVAL_FALSE;
+    }
+    else
+    {
+	typ1->v_type = VAR_NUMBER;
+	typ1->vval.v_number = n1;
+    }
 
     return OK;
 }
 
+/*
+ * Convert any type to a string, never give an error.
+ * When "quotes" is TRUE add quotes to a string.
+ * Returns an allocated string.
+ */
     char_u *
-typval_tostring(typval_T *arg)
+typval_tostring(typval_T *arg, int quotes)
 {
     char_u	*tofree;
     char_u	numbuf[NUMBUFLEN];
@@ -805,10 +947,18 @@ typval_tostring(typval_T *arg)
 
     if (arg == NULL)
 	return vim_strsave((char_u *)"(does not exist)");
-    ret = tv2string(arg, &tofree, numbuf, 0);
-    // Make a copy if we have a value but it's not in allocated memory.
-    if (ret != NULL && tofree == NULL)
-	ret = vim_strsave(ret);
+    if (!quotes && arg->v_type == VAR_STRING)
+    {
+	ret = vim_strsave(arg->vval.v_string == NULL ? (char_u *)""
+							 : arg->vval.v_string);
+    }
+    else
+    {
+	ret = tv2string(arg, &tofree, numbuf, 0);
+	// Make a copy if we have a value but it's not in allocated memory.
+	if (ret != NULL && tofree == NULL)
+	    ret = vim_strsave(ret);
+    }
     return ret;
 }
 
@@ -925,7 +1075,9 @@ tv_equal(
 	return r;
     }
 
-    if (tv1->v_type != tv2->v_type)
+    if (tv1->v_type != tv2->v_type
+	    && ((tv1->v_type != VAR_BOOL && tv1->v_type != VAR_SPECIAL)
+		|| (tv2->v_type != VAR_BOOL && tv2->v_type != VAR_SPECIAL)))
 	return FALSE;
 
     switch (tv1->v_type)
@@ -992,7 +1144,7 @@ tv_equal(
  * Return OK or FAIL.
  */
     int
-get_option_tv(
+eval_option(
     char_u	**arg,
     typval_T	*rettv,	// when NULL, only check if option exists
     int		evaluate)
@@ -1000,7 +1152,7 @@ get_option_tv(
     char_u	*option_end;
     long	numval;
     char_u	*stringval;
-    int		opt_type;
+    getoption_T	opt_type;
     int		c;
     int		working = (**arg == '+');    // has("+option")
     int		ret = OK;
@@ -1026,7 +1178,7 @@ get_option_tv(
     opt_type = get_option_value(*arg, &numval,
 			       rettv == NULL ? NULL : &stringval, opt_flags);
 
-    if (opt_type == -3)			// invalid name
+    if (opt_type == gov_unknown)
     {
 	if (rettv != NULL)
 	    semsg(_(e_unknown_option), *arg);
@@ -1034,20 +1186,30 @@ get_option_tv(
     }
     else if (rettv != NULL)
     {
-	if (opt_type == -2)		// hidden string option
+	rettv->v_lock = 0;
+	if (opt_type == gov_hidden_string)
 	{
 	    rettv->v_type = VAR_STRING;
 	    rettv->vval.v_string = NULL;
 	}
-	else if (opt_type == -1)	// hidden number option
+	else if (opt_type == gov_hidden_bool || opt_type == gov_hidden_number)
 	{
-	    rettv->v_type = VAR_NUMBER;
+	    rettv->v_type = in_vim9script() && opt_type == gov_hidden_bool
+						       ? VAR_BOOL : VAR_NUMBER;
 	    rettv->vval.v_number = 0;
 	}
-	else if (opt_type == 1)		// number option
+	else if (opt_type == gov_bool || opt_type == gov_number)
 	{
-	    rettv->v_type = VAR_NUMBER;
-	    rettv->vval.v_number = numval;
+	    if (in_vim9script() && opt_type == gov_bool)
+	    {
+		rettv->v_type = VAR_BOOL;
+		rettv->vval.v_number = numval ? VVAL_TRUE : VVAL_FALSE;
+	    }
+	    else
+	    {
+		rettv->v_type = VAR_NUMBER;
+		rettv->vval.v_number = numval;
+	    }
 	}
 	else				// string option
 	{
@@ -1055,7 +1217,9 @@ get_option_tv(
 	    rettv->vval.v_string = stringval;
 	}
     }
-    else if (working && (opt_type == -2 || opt_type == -1))
+    else if (working && (opt_type == gov_hidden_bool
+			|| opt_type == gov_hidden_number
+			|| opt_type == gov_hidden_string))
 	ret = FAIL;
 
     *option_end = c;		    // put back for error messages
@@ -1069,7 +1233,7 @@ get_option_tv(
  * Return OK or FAIL.
  */
     int
-get_number_tv(
+eval_number(
 	char_u	    **arg,
 	typval_T    *rettv,
 	int	    evaluate,
@@ -1179,10 +1343,10 @@ get_number_tv(
  * Return OK or FAIL.
  */
     int
-get_string_tv(char_u **arg, typval_T *rettv, int evaluate)
+eval_string(char_u **arg, typval_T *rettv, int evaluate)
 {
     char_u	*p;
-    char_u	*name;
+    char_u	*end;
     int		extra = 0;
     int		len;
 
@@ -1216,12 +1380,12 @@ get_string_tv(char_u **arg, typval_T *rettv, int evaluate)
 
     // Copy the string into allocated memory, handling backslashed
     // characters.
-    len = (int)(p - *arg + extra);
-    name = alloc(len);
-    if (name == NULL)
-	return FAIL;
     rettv->v_type = VAR_STRING;
-    rettv->vval.v_string = name;
+    len = (int)(p - *arg + extra);
+    rettv->vval.v_string = alloc(len);
+    if (rettv->vval.v_string == NULL)
+	return FAIL;
+    end = rettv->vval.v_string;
 
     for (p = *arg + 1; *p != NUL && *p != '"'; )
     {
@@ -1229,12 +1393,12 @@ get_string_tv(char_u **arg, typval_T *rettv, int evaluate)
 	{
 	    switch (*++p)
 	    {
-		case 'b': *name++ = BS; ++p; break;
-		case 'e': *name++ = ESC; ++p; break;
-		case 'f': *name++ = FF; ++p; break;
-		case 'n': *name++ = NL; ++p; break;
-		case 'r': *name++ = CAR; ++p; break;
-		case 't': *name++ = TAB; ++p; break;
+		case 'b': *end++ = BS; ++p; break;
+		case 'e': *end++ = ESC; ++p; break;
+		case 'f': *end++ = FF; ++p; break;
+		case 'n': *end++ = NL; ++p; break;
+		case 'r': *end++ = CAR; ++p; break;
+		case 't': *end++ = TAB; ++p; break;
 
 		case 'X': // hex: "\x1", "\x12"
 		case 'x':
@@ -1261,9 +1425,9 @@ get_string_tv(char_u **arg, typval_T *rettv, int evaluate)
 			      // For "\u" store the number according to
 			      // 'encoding'.
 			      if (c != 'X')
-				  name += (*mb_char2bytes)(nr, name);
+				  end += (*mb_char2bytes)(nr, end);
 			      else
-				  *name++ = nr;
+				  *end++ = nr;
 			  }
 			  break;
 
@@ -1275,37 +1439,42 @@ get_string_tv(char_u **arg, typval_T *rettv, int evaluate)
 		case '4':
 		case '5':
 		case '6':
-		case '7': *name = *p++ - '0';
+		case '7': *end = *p++ - '0';
 			  if (*p >= '0' && *p <= '7')
 			  {
-			      *name = (*name << 3) + *p++ - '0';
+			      *end = (*end << 3) + *p++ - '0';
 			      if (*p >= '0' && *p <= '7')
-				  *name = (*name << 3) + *p++ - '0';
+				  *end = (*end << 3) + *p++ - '0';
 			  }
-			  ++name;
+			  ++end;
 			  break;
 
-			    // Special key, e.g.: "\<C-W>"
-		case '<': extra = trans_special(&p, name, TRUE, TRUE,
-								   TRUE, NULL);
-			  if (extra != 0)
+			  // Special key, e.g.: "\<C-W>"
+		case '<':
 			  {
-			      name += extra;
-			      if (name >= rettv->vval.v_string + len)
-				  iemsg("get_string_tv() used more space than allocated");
-			      break;
+			      int flags = FSK_KEYCODE | FSK_IN_STRING;
+
+			      if (p[1] != '*')
+				  flags |= FSK_SIMPLIFY;
+			      extra = trans_special(&p, end, flags, NULL);
+			      if (extra != 0)
+			      {
+				  end += extra;
+				  if (end >= rettv->vval.v_string + len)
+				      iemsg("eval_string() used more space than allocated");
+				  break;
+			      }
 			  }
 			  // FALLTHROUGH
 
-		default:  MB_COPY_CHAR(p, name);
+		default:  MB_COPY_CHAR(p, end);
 			  break;
 	    }
 	}
 	else
-	    MB_COPY_CHAR(p, name);
-
+	    MB_COPY_CHAR(p, end);
     }
-    *name = NUL;
+    *end = NUL;
     if (*p != NUL) // just in case
 	++p;
     *arg = p;
@@ -1318,7 +1487,7 @@ get_string_tv(char_u **arg, typval_T *rettv, int evaluate)
  * Return OK or FAIL.
  */
     int
-get_lit_string_tv(char_u **arg, typval_T *rettv, int evaluate)
+eval_lit_string(char_u **arg, typval_T *rettv, int evaluate)
 {
     char_u	*p;
     char_u	*str;
@@ -1396,7 +1565,7 @@ tv2string(
  * Return FAIL if the name is invalid.
  */
     int
-get_env_tv(char_u **arg, typval_T *rettv, int evaluate)
+eval_env_var(char_u **arg, typval_T *rettv, int evaluate)
 {
     char_u	*string = NULL;
     int		len;
@@ -1448,14 +1617,16 @@ get_env_tv(char_u **arg, typval_T *rettv, int evaluate)
     linenr_T
 tv_get_lnum(typval_T *argvars)
 {
-    linenr_T	lnum;
+    linenr_T	lnum = -1;
 
-    lnum = (linenr_T)tv_get_number_chk(&argvars[0], NULL);
-    if (lnum == 0)  // no valid number, try using arg like line()
+    if (argvars[0].v_type != VAR_STRING || !in_vim9script())
+	lnum = (linenr_T)tv_get_number_chk(&argvars[0], NULL);
+    if (lnum <= 0 && argvars[0].v_type != VAR_NUMBER)
     {
 	int	fnum;
-	pos_T	*fp = var2fpos(&argvars[0], TRUE, &fnum);
+	pos_T	*fp = var2fpos(&argvars[0], TRUE, &fnum, FALSE);
 
+	// no valid number, try using arg like line()
 	if (fp != NULL)
 	    lnum = fp->lnum;
     }
@@ -1502,6 +1673,25 @@ tv_get_buf(typval_T *tv, int curtab_only)
     if (buf == NULL)
 	buf = find_buffer(tv);
 
+    return buf;
+}
+
+/*
+ * Like tv_get_buf() but give an error message is the type is wrong.
+ */
+    buf_T *
+tv_get_buf_from_arg(typval_T *tv)
+{
+    buf_T *buf;
+
+    ++emsg_off;
+    buf = tv_get_buf(tv, FALSE);
+    --emsg_off;
+    if (buf == NULL
+	    && tv->v_type != VAR_NUMBER
+	    && tv->v_type != VAR_STRING)
+	// issue errmsg for type error
+	(void)tv_get_number(tv);
     return buf;
 }
 

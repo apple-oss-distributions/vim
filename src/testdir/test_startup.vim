@@ -21,9 +21,7 @@ endfunc
 " 2. packages
 " 3. plugins in after directories
 func Test_after_comes_later()
-  if !has('packages')
-    return
-  endif
+  CheckFeature packages
   let before =<< trim [CODE]
     set nocp viminfo+=nviminfo
     set guioptions+=M
@@ -80,9 +78,7 @@ func Test_after_comes_later()
 endfunc
 
 func Test_pack_in_rtp_when_plugins_run()
-  if !has('packages')
-    return
-  endif
+  CheckFeature packages
   let before =<< trim [CODE]
     set nocp viminfo+=nviminfo
     set guioptions+=M
@@ -113,10 +109,9 @@ func Test_pack_in_rtp_when_plugins_run()
 endfunc
 
 func Test_help_arg()
-  if !has('unix') && has('gui')
-    " this doesn't work with gvim on MS-Windows
-    return
-  endif
+  " This does not work with a GUI-only binary, such as on MS-Windows.
+  CheckAnyOf Unix NotGui
+
   if RunVim([], [], '--help >Xtestout')
     let lines = readfile('Xtestout')
     call assert_true(len(lines) > 20)
@@ -285,7 +280,15 @@ endfunc
 func Test_q_arg()
   CheckFeature quickfix
 
-  let source_file = has('win32') ? '..\memfile.c' : '../memfile.c'
+  let lines =<< trim END
+    /* some file with an error */
+    main() {
+      functionCall(arg; arg, arg);
+      return 666
+    }
+  END
+  call writefile(lines, 'Xbadfile.c')
+
   let after =<< trim [CODE]
     call writefile([&errorfile, string(getpos("."))], "Xtestout")
     copen
@@ -295,24 +298,24 @@ func Test_q_arg()
 
   " Test with default argument '-q'.
   call assert_equal('errors.err', &errorfile)
-  call writefile(["../memfile.c:208:5: error: expected ';' before '}' token"], 'errors.err')
+  call writefile(["Xbadfile.c:4:12: error: expected ';' before '}' token"], 'errors.err')
   if RunVim([], after, '-q')
     let lines = readfile('Xtestout')
     call assert_equal(['errors.err',
-	\              '[0, 208, 5, 0]',
-	\              source_file . "|208 col 5| error: expected ';' before '}' token"],
+	\              '[0, 4, 12, 0]',
+	\              "Xbadfile.c|4 col 12| error: expected ';' before '}' token"],
 	\             lines)
   endif
   call delete('Xtestout')
   call delete('errors.err')
 
   " Test with explicit argument '-q Xerrors' (with space).
-  call writefile(["../memfile.c:208:5: error: expected ';' before '}' token"], 'Xerrors')
+  call writefile(["Xbadfile.c:4:12: error: expected ';' before '}' token"], 'Xerrors')
   if RunVim([], after, '-q Xerrors')
     let lines = readfile('Xtestout')
     call assert_equal(['Xerrors',
-	\              '[0, 208, 5, 0]',
-	\              source_file . "|208 col 5| error: expected ';' before '}' token"],
+	\              '[0, 4, 12, 0]',
+	\              "Xbadfile.c|4 col 12| error: expected ';' before '}' token"],
 	\             lines)
   endif
   call delete('Xtestout')
@@ -321,8 +324,8 @@ func Test_q_arg()
   if RunVim([], after, '-qXerrors')
     let lines = readfile('Xtestout')
     call assert_equal(['Xerrors',
-	\              '[0, 208, 5, 0]',
-	\              source_file . "|208 col 5| error: expected ';' before '}' token"],
+	\              '[0, 4, 12, 0]',
+	\              "Xbadfile.c|4 col 12| error: expected ';' before '}' token"],
 	\             lines)
   endif
 
@@ -330,6 +333,7 @@ func Test_q_arg()
   let out = system(GetVimCommand() .. ' -q xyz.err')
   call assert_equal(3, v:shell_error)
 
+  call delete('Xbadfile.c')
   call delete('Xtestout')
   call delete('Xerrors')
 endfunc
@@ -403,6 +407,134 @@ func Test_A_F_H_arg()
 
   call delete('Xtestout')
 endfunc
+
+" Test the --echo-wid argument (for GTK GUI only).
+func Test_echo_wid()
+  CheckCanRunGui
+  CheckFeature gui_gtk
+
+  if RunVim([], [], '-g --echo-wid -cq >Xtest_echo_wid')
+    let lines = readfile('Xtest_echo_wid')
+    call assert_equal(1, len(lines))
+    call assert_match('^WID: \d\+$', lines[0])
+  endif
+
+  call delete('Xtest_echo_wid')
+endfunction
+
+" Test the -reverse and +reverse arguments (for GUI only).
+func Test_reverse()
+  CheckCanRunGui
+  CheckAnyOf Feature:gui_gtk Feature:gui_motif Feature:gui_athena
+
+  let after =<< trim [CODE]
+    call writefile([&background], "Xtest_reverse")
+    qall
+  [CODE]
+  if RunVim([], after, '-f -g -reverse')
+    let lines = readfile('Xtest_reverse')
+    call assert_equal(['dark'], lines)
+  endif
+  if RunVim([], after, '-f -g +reverse')
+    let lines = readfile('Xtest_reverse')
+    call assert_equal(['light'], lines)
+  endif
+
+  call delete('Xtest_reverse')
+endfunc
+
+" Test the -background and -foreground arguments (for GUI only).
+func Test_background_foreground()
+  CheckCanRunGui
+  CheckAnyOf Feature:gui_gtk Feature:gui_motif Feature:gui_athena
+
+  " Is there a better way to check the effect of -background & -foreground
+  " other than merely looking at &background (dark or light)?
+  let after =<< trim [CODE]
+    call writefile([&background], "Xtest_fg_bg")
+    qall
+  [CODE]
+  if RunVim([], after, '-f -g -background darkred -foreground yellow')
+    let lines = readfile('Xtest_fg_bg')
+    call assert_equal(['dark'], lines)
+  endif
+  if RunVim([], after, '-f -g -background ivory -foreground darkgreen')
+    let lines = readfile('Xtest_fg_bg')
+    call assert_equal(['light'], lines)
+  endif
+
+  call delete('Xtest_fg_bg')
+endfunc
+
+" Test the -font argument (for GUI only).
+func Test_font()
+  CheckCanRunGui
+  CheckNotMSWindows
+
+  if has('gui_gtk')
+    let font = 'Courier 14'
+  elseif has('gui_motif') || has('gui_athena')
+    let font = '-misc-fixed-bold-*'
+  else
+    throw 'Skipped: test does not set a valid font for this GUI'
+  endif
+
+  let after =<< trim [CODE]
+    call writefile([&guifont], "Xtest_font")
+    qall
+  [CODE]
+
+  if RunVim([], after, '--nofork -g -font "' .. font .. '"')
+    let lines = readfile('Xtest_font')
+    call assert_equal([font], lines)
+  endif
+
+  call delete('Xtest_font')
+endfunc
+
+" Test the -geometry argument (for GUI only).
+func Test_geometry()
+  CheckCanRunGui
+  CheckAnyOf Feature:gui_gtk Feature:gui_motif Feature:gui_athena
+
+  if has('gui_motif') || has('gui_athena')
+    " FIXME: With GUI Athena or Motif, the value of getwinposx(),
+    "        getwinposy() and getwinpos() do not match exactly the
+    "        value given in -geometry. Why?
+    "        So only check &columns and &lines for those GUIs.
+    let after =<< trim [CODE]
+      call writefile([&columns, &lines], "Xtest_geometry")
+      qall
+    [CODE]
+    if RunVim([], after, '-f -g -geometry 31x13+41+43')
+      let lines = readfile('Xtest_geometry')
+      call assert_equal(['31', '13'], lines)
+    endif
+  else
+    let after =<< trim [CODE]
+      call writefile([&columns, &lines, getwinposx(), getwinposy(), string(getwinpos())], "Xtest_geometry")
+      qall
+    [CODE]
+    if RunVim([], after, '-f -g -geometry 31x13+41+43')
+      let lines = readfile('Xtest_geometry')
+      call assert_equal(['31', '13', '41', '43', '[41, 43]'], lines)
+    endif
+  endif
+
+  call delete('Xtest_geometry')
+endfunc
+
+" Test the -iconic argument (for GUI only).
+func Test_iconic()
+  CheckCanRunGui
+  CheckAnyOf Feature:gui_gtk Feature:gui_motif Feature:gui_athena
+
+  call RunVim([], [], '-f -g -iconic -cq')
+
+  " TODO: currently only start vim iconified, but does not
+  "       check that vim is iconified. How could this be checked?
+endfunc
+
 
 func Test_invalid_args()
   " must be able to get the output of Vim.
@@ -545,9 +677,7 @@ func Test_file_args()
 endfunc
 
 func Test_startuptime()
-  if !has('startuptime')
-    return
-  endif
+  CheckFeature startuptime
   let after = ['qall']
   if RunVim([], after, '--startuptime Xtestout one')
     let lines = readfile('Xtestout')
@@ -673,9 +803,7 @@ func Test_issue_3969()
 endfunc
 
 func Test_start_with_tabs()
-  if !CanRunVimInTerminal()
-    throw 'Skipped: cannot make screendumps'
-  endif
+  CheckRunVimInTerminal
 
   let buf = RunVimInTerminal('-p a b c', {})
   call VerifyScreenDump(buf, 'Test_start_with_tabs', {})
@@ -732,13 +860,62 @@ func Test_t_arg()
         \ 'Xtags')
   call writefile(['    first', '    second', '    third'], 'Xfile1')
 
-  if RunVim(before, after, '-t second')
-    call assert_equal(['Xfile1:L2C5'], readfile('Xtestout'))
-    call delete('Xtestout')
-  endif
+  for t_arg in ['-t second', '-tsecond']
+    if RunVim(before, after, '-t second')
+      call assert_equal(['Xfile1:L2C5'], readfile('Xtestout'), t_arg)
+      call delete('Xtestout')
+    endif
+  endfor
 
   call delete('Xtags')
   call delete('Xfile1')
+endfunc
+
+" Test the '-T' argument which sets the 'term' option.
+func Test_T_arg()
+  CheckNotGui
+  let after =<< trim [CODE]
+    call writefile([&term], "Xtest_T_arg")
+    qall
+  [CODE]
+
+  for t in ['builtin_dumb', 'builtin_ansi']
+    if RunVim([], after, '-T ' .. t)
+      let lines = readfile('Xtest_T_arg')
+      call assert_equal([t], lines)
+    endif
+  endfor
+
+  call delete('Xtest_T_arg')
+endfunc
+
+" Test the '-x' argument to read/write encrypted files.
+func Test_x_arg()
+  CheckRunVimInTerminal
+  CheckFeature cryptv
+
+  " Create an encrypted file Xtest_x_arg.
+  let buf = RunVimInTerminal('-n -x Xtest_x_arg', #{rows: 10, wait_for_ruler: 0})
+  call WaitForAssert({-> assert_match('^Enter encryption key: ', term_getline(buf, 10))})
+  call term_sendkeys(buf, "foo\n")
+  call WaitForAssert({-> assert_match('^Enter same key again: ', term_getline(buf, 10))})
+  call term_sendkeys(buf, "foo\n")
+  call WaitForAssert({-> assert_match(' All$', term_getline(buf, 10))})
+  call term_sendkeys(buf, "itest\<Esc>:w\<Enter>")
+  call WaitForAssert({-> assert_match('"Xtest_x_arg" \[New\]\[blowfish2\] 1L, 5B written',
+        \            term_getline(buf, 10))})
+  call StopVimInTerminal(buf)
+
+  " Read the encrypted file and check that it contains the expected content "test"
+  let buf = RunVimInTerminal('-n -x Xtest_x_arg', #{rows: 10, wait_for_ruler: 0})
+  call WaitForAssert({-> assert_match('^Enter encryption key: ', term_getline(buf, 10))})
+  call term_sendkeys(buf, "foo\n")
+  call WaitForAssert({-> assert_match('^Enter same key again: ', term_getline(buf, 10))})
+  call term_sendkeys(buf, "foo\n")
+  call WaitForAssert({-> assert_match('^test', term_getline(buf, 1))})
+  call StopVimInTerminal(buf)
+
+  call delete('Xtest_x_arg')
 endfunc
 
 " Test for entering the insert mode on startup
@@ -783,9 +960,7 @@ endfunc
 
 " Test for specifying a non-existing vimrc file using "-u"
 func Test_missing_vimrc()
-  if !CanRunVimInTerminal()
-    throw 'Skipped: cannot run vim in terminal'
-  endif
+  CheckRunVimInTerminal
   let after =<< trim [CODE]
     call assert_match('^E282:', v:errmsg)
     call writefile(v:errors, 'Xtestout')
@@ -868,10 +1043,37 @@ func Test_io_not_a_terminal()
         \ 'Vim: Warning: Input is not from a terminal'], l)
 endfunc
 
+" Test for --not-a-term avoiding escape codes.
+func Test_not_a_term()
+  CheckUnix
+  CheckNotGui
+
+  if &shellredir =~ '%s'
+    let redir = printf(&shellredir,  'Xvimout')
+  else
+    let redir = &shellredir .. ' Xvimout'
+  endif
+
+  " Without --not-a-term there are a few escape sequences.
+  " This will take 2 seconds because of the missing --not-a-term
+  let cmd = GetVimProg() .. ' --cmd quit ' .. redir
+  exe "silent !" . cmd
+  call assert_match("\<Esc>", readfile('Xvimout')->join())
+  call delete('Xvimout')
+
+  " With --not-a-term there are no escape sequences.
+  let cmd = GetVimProg() .. ' --not-a-term --cmd quit ' .. redir
+  exe "silent !" . cmd
+  call assert_notmatch("\<Esc>", readfile('Xvimout')->join())
+  call delete('Xvimout')
+endfunc
+
+
 " Test for the "-w scriptout" argument
 func Test_w_arg()
   " Can't catch the output of gvim.
   CheckNotGui
+
   call writefile(["iVim Editor\<Esc>:q!\<CR>"], 'Xscriptin', 'b')
   if RunVim([], [], '-s Xscriptin -w Xscriptout')
     call assert_equal(["iVim Editor\e:q!\r"], readfile('Xscriptout'))
@@ -887,6 +1089,16 @@ func Test_w_arg()
     call assert_equal("Cannot open for script output: \"Xdir\"\n", m)
     call delete("Xdir", 'rf')
   endif
+
+  " A number argument sets the 'window' option
+  call writefile(["iwindow \<C-R>=&window\<CR>\<Esc>:wq! Xresult\<CR>"], 'Xscriptin', 'b')
+  for w_arg in ['-w 17', '-w17']
+    if RunVim([], [], '-s Xscriptin ' .. w_arg)
+      call assert_equal(["window 17"], readfile('Xresult'), w_arg)
+      call delete('Xresult')
+    endif
+  endfor
+  call delete('Xscriptin')
 endfunc
 
 " Test for the "-s scriptin" argument
@@ -915,7 +1127,6 @@ func Test_n_arg()
     call assert_equal([], readfile('Xtestout'))
     call delete('Xtestout')
   endif
-  call delete('Xafter')
 endfunc
 
 " Test for the "-h" (help) argument
@@ -947,7 +1158,21 @@ func Test_E_arg()
     call assert_equal([], readfile('Xtestout'))
     call delete('Xtestout')
   endif
-  call delete('Xafter')
+endfunc
+
+" Test for the "-D" (debugger) argument
+func Test_D_arg()
+  CheckRunVimInTerminal
+
+  let cmd = GetVimCommandCleanTerm() .. ' -D'
+  let buf = term_start(cmd, {'term_rows' : 10})
+  call WaitForAssert({-> assert_equal("running", term_getstatus(buf))})
+
+  call WaitForAssert({-> assert_equal('Entering Debug mode.  Type "cont" to continue.',
+  \                  term_getline(buf, 7))})
+  call WaitForAssert({-> assert_equal('>', term_getline(buf, 10))})
+
+  call StopVimInTerminal(buf)
 endfunc
 
 " Test for too many edit argument errors
@@ -957,6 +1182,85 @@ func Test_too_many_edit_args()
   CheckEnglish
   let l = systemlist(GetVimProg() .. ' - -')
   call assert_match('^Too many edit arguments: "-"', l[1])
+endfunc
+
+" Test starting vim with various names: vim, ex, view, evim, etc.
+func Test_progname()
+  CheckUnix
+
+  call mkdir('Xprogname', 'p')
+  call writefile(['silent !date',
+  \               'call writefile([mode(1), '
+  \               .. '&insertmode, &diff, &readonly, &updatecount, '
+  \               .. 'join(split(execute("message"), "\n")[1:])], "Xprogname_out")',
+  \               'qall'], 'Xprogname_after')
+
+  "  +---------------------------------------------- progname
+  "  |            +--------------------------------- mode(1)
+  "  |            |     +--------------------------- &insertmode
+  "  |            |     |    +---------------------- &diff
+  "  |            |     |    |    +----------------- &readonly
+  "  |            |     |    |    |        +-------- &updatecount
+  "  |            |     |    |    |        |    +--- :messages
+  "  |            |     |    |    |        |    |
+  let expectations = {
+  \ 'vim':      ['n',  '0', '0', '0',   '200', ''],
+  \ 'gvim':     ['n',  '0', '0', '0',   '200', ''],
+  \ 'ex':       ['ce', '0', '0', '0',   '200', ''],
+  \ 'exim':     ['cv', '0', '0', '0',   '200', ''],
+  \ 'view':     ['n',  '0', '0', '1', '10000', ''],
+  \ 'gview':    ['n',  '0', '0', '1', '10000', ''],
+  \ 'evim':     ['n',  '1', '0', '0',   '200', ''],
+  \ 'eview':    ['n',  '1', '0', '1', '10000', ''],
+  \ 'rvim':     ['n',  '0', '0', '0',   '200', 'line    1: E145: Shell commands and some functionality not allowed in rvim'],
+  \ 'rgvim':    ['n',  '0', '0', '0',   '200', 'line    1: E145: Shell commands and some functionality not allowed in rvim'],
+  \ 'rview':    ['n',  '0', '0', '1', '10000', 'line    1: E145: Shell commands and some functionality not allowed in rvim'],
+  \ 'rgview':   ['n',  '0', '0', '1', '10000', 'line    1: E145: Shell commands and some functionality not allowed in rvim'],
+  \ 'vimdiff':  ['n',  '0', '1', '0',   '200', ''],
+  \ 'gvimdiff': ['n',  '0', '1', '0',   '200', '']}
+
+  let prognames = ['vim', 'gvim', 'ex', 'exim', 'view', 'gview',
+  \                'evim', 'eview', 'rvim', 'rgvim', 'rview', 'rgview',
+  \                'vimdiff', 'gvimdiff']
+
+  for progname in prognames
+    let run_with_gui = (progname =~# 'g') || (has('gui') && (progname ==# 'evim' || progname ==# 'eview'))
+
+    if empty($DISPLAY) && run_with_gui
+      " Can't run gvim, gview  (etc.) if $DISPLAY is not setup.
+      continue
+    endif
+
+    exe 'silent !ln -s -f ' ..exepath(GetVimProg()) .. ' Xprogname/' .. progname
+
+    let stdout_stderr = ''
+    if progname =~# 'g'
+      let stdout_stderr = system('Xprogname/'..progname..' -f --clean --not-a-term -S Xprogname_after')
+    else
+      exe 'sil !Xprogname/'..progname..' -f --clean --not-a-term -S Xprogname_after'
+    endif
+
+    if progname =~# 'g' && !has('gui')
+      call assert_equal("E25: GUI cannot be used: Not enabled at compile time\n", stdout_stderr, progname)
+    else
+      " GUI motif can output some warnings like this:
+      "   Warning:
+      "       Name: subMenu
+      "       Class: XmCascadeButton
+      "       Illegal mnemonic character;  Could not convert X KEYSYM to a keycode
+      " So don't check that stderr is empty with GUI Motif.
+      if run_with_gui && !has('gui_motif')
+        call assert_equal('', stdout_stderr, progname)
+      endif
+      call assert_equal(expectations[progname], readfile('Xprogname_out'), progname)
+    endif
+
+    call delete('Xprogname/' .. progname)
+    call delete('Xprogname_out')
+  endfor
+
+  call delete('Xprogname_after')
+  call delete('Xprogname', 'd')
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

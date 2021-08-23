@@ -289,7 +289,7 @@ ex_menu(
     }
     else if (*map_to != NUL && (unmenu || enable != MAYBE))
     {
-	emsg(_(e_trailing));
+	semsg(_(e_trailing_arg), map_to);
 	goto theend;
     }
 #if defined(FEAT_GUI) && !(defined(FEAT_GUI_GTK) || defined(FEAT_GUI_PHOTON))
@@ -1810,7 +1810,7 @@ menu_text(char_u *str, int *mnemonic, char_u **actext)
     {
 	if (actext != NULL)
 	    *actext = vim_strsave(p + 1);
-	text = vim_strnsave(str, (int)(p - str));
+	text = vim_strnsave(str, p - str);
     }
     else
 	text = vim_strsave(str);
@@ -2310,11 +2310,7 @@ execute_menu(exarg_T *eap, vimmenu_T *menu, int mode_idx)
     if (idx < 0)
     {
 	// Use the Insert mode entry when returning to Insert mode.
-	if (restart_edit
-#ifdef FEAT_EVAL
-		&& !current_sctx.sc_sid
-#endif
-		)
+	if (restart_edit && !current_sctx.sc_sid)
 	{
 	    idx = MENU_INDEX_INSERT;
 	}
@@ -2384,11 +2380,7 @@ execute_menu(exarg_T *eap, vimmenu_T *menu, int mode_idx)
 	// When executing a script or function execute the commands right now.
 	// Also for the window toolbar.
 	// Otherwise put them in the typeahead buffer.
-	if (eap == NULL
-#ifdef FEAT_EVAL
-		|| current_sctx.sc_sid != 0
-#endif
-	   )
+	if (eap == NULL || current_sctx.sc_sid != 0)
 	{
 	    save_state_T save_state;
 
@@ -2716,7 +2708,7 @@ ex_menutranslate(exarg_T *eap UNUSED)
 		if (from != NULL)
 		{
 		    from_noamp = menu_text(from, NULL, NULL);
-		    to = vim_strnsave(to, (int)(arg - to));
+		    to = vim_strnsave(to, arg - to);
 		    if (from_noamp != NULL && to != NULL)
 		    {
 			menu_translate_tab_and_shift(from);

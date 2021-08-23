@@ -1,5 +1,4 @@
 " Test for cinoptions and cindent
-"
 
 func Test_cino_hash()
   " Test that curbuf->b_ind_hash_comment is correctly reset
@@ -5270,6 +5269,42 @@ func Test_cindent_change_multline()
   normal! jc3jm = 2;
   call assert_equal("\tm = 2;", getline(2))
   close!
+endfunc
+
+func Test_cindent_pragma()
+  new
+  setl cindent ts=4 sw=4
+  setl cino=Ps
+
+  let code =<< trim [CODE]
+  {
+  #pragma omp parallel
+  {
+  #pragma omp task
+  foo();
+  # pragma omp taskwait
+  }
+  }
+  [CODE]
+
+  call append(0, code)
+  normal gg
+  normal =G
+
+  let expected =<< trim [CODE]
+  {
+	#pragma omp parallel
+	{
+		#pragma omp task
+		foo();
+		# pragma omp taskwait
+	}
+  }
+
+  [CODE]
+
+  call assert_equal(expected, getline(1, '$'))
+  enew! | close
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

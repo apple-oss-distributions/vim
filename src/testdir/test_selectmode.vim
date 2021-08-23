@@ -38,6 +38,9 @@ func Test_selectmode_start()
   set selectmode=cmd
   call feedkeys('gvabc', 'xt')
   call assert_equal('abctdef', getline(1))
+  " arrow keys without shift should not start selection
+  call feedkeys("A\<Home>\<Right>\<Left>ro", 'xt')
+  call assert_equal('roabctdef', getline(1))
   set selectmode= keymodel=
   bw!
 endfunc
@@ -162,7 +165,10 @@ func Test_term_mouse_multiple_clicks_to_select_mode()
   let save_term = &term
   let save_ttymouse = &ttymouse
   call test_override('no_query_mouse', 1)
-  set mouse=a term=xterm mousetime=200
+
+  " 'mousetime' must be sufficiently large, or else the test is flaky when
+  " using a ssh connection with X forwarding; i.e. ssh -X.
+  set mouse=a term=xterm mousetime=1000
   set selectmode=mouse
   new
 

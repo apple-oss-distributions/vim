@@ -11,7 +11,7 @@ func Test_visual_block_insert()
   bwipeout!
 endfunc
 
-" Test for built-in function strchars()
+" Test for built-in functions strchars() and strcharlen()
 func Test_strchars()
   let inp = ["a", "あいa", "A\u20dd", "A\u20dd\u20dd", "\u20dd"]
   let exp = [[1, 1, 1], [3, 3, 3], [2, 2, 1], [3, 3, 1], [1, 1, 1]]
@@ -20,8 +20,15 @@ func Test_strchars()
     call assert_equal(exp[i][1], inp[i]->strchars(0))
     call assert_equal(exp[i][2], strchars(inp[i], 1))
   endfor
-  call assert_fails("let v=strchars('abc', [])", 'E474:')
-  call assert_fails("let v=strchars('abc', 2)", 'E474:')
+
+  let exp = [1, 3, 1, 1, 1]
+  for i in range(len(inp))
+    call assert_equal(exp[i], inp[i]->strcharlen())
+    call assert_equal(exp[i], strcharlen(inp[i]))
+  endfor
+
+  call assert_fails("let v=strchars('abc', [])", 'E745:')
+  call assert_fails("let v=strchars('abc', 2)", 'E1023:')
 endfunc
 
 " Test for customlist completion
@@ -142,6 +149,50 @@ func Test_screenchar_utf8()
 
   call assert_equal([text . '  '], ScreenLines(1, 8))
 
+  bwipe!
+endfunc
+
+func Test_setcellwidths()
+  call setcellwidths([
+        \ [0x1330, 0x1330, 2],
+        \ [9999, 10000, 1],
+        \ [0x1337, 0x1339, 2],
+        \])
+
+  call assert_equal(2, strwidth("\u1330"))
+  call assert_equal(1, strwidth("\u1336"))
+  call assert_equal(2, strwidth("\u1337"))
+  call assert_equal(2, strwidth("\u1339"))
+  call assert_equal(1, strwidth("\u133a"))
+
+  call setcellwidths([])
+
+  call assert_fails('call setcellwidths(1)', 'E714:')
+
+  call assert_fails('call setcellwidths([1, 2, 0])', 'E1109:')
+
+  call assert_fails('call setcellwidths([[0x101]])', 'E1110:')
+  call assert_fails('call setcellwidths([[0x101, 0x102]])', 'E1110:')
+  call assert_fails('call setcellwidths([[0x101, 0x102, 1, 4]])', 'E1110:')
+  call assert_fails('call setcellwidths([["a"]])', 'E1110:')
+
+  call assert_fails('call setcellwidths([[0x102, 0x101, 1]])', 'E1111:')
+
+  call assert_fails('call setcellwidths([[0x101, 0x102, 0]])', 'E1112:')
+  call assert_fails('call setcellwidths([[0x101, 0x102, 3]])', 'E1112:')
+
+  call assert_fails('call setcellwidths([[0x111, 0x122, 1], [0x115, 0x116, 2]])', 'E1113:')
+  call assert_fails('call setcellwidths([[0x111, 0x122, 1], [0x122, 0x123, 2]])', 'E1113:')
+
+  call assert_fails('call setcellwidths([[0x33, 0x44, 2]])', 'E1114:')
+endfunc
+
+func Test_print_overlong()
+  " Text with more composing characters than MB_MAXBYTES.
+  new
+  call setline(1, 'axxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
+  s/x/\=nr2char(1629)/g
+  print
   bwipe!
 endfunc
 

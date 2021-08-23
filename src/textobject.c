@@ -26,6 +26,7 @@ static int skip_chars(int, int);
 findsent(int dir, long count)
 {
     pos_T	pos, tpos;
+    pos_T	prev_pos;
     int		c;
     int		(*func)(pos_T *);
     int		startlnum;
@@ -41,6 +42,8 @@ findsent(int dir, long count)
 
     while (count--)
     {
+	prev_pos = pos;
+
 	/*
 	 * if on an empty line, skip up to a non-empty line
 	 */
@@ -133,6 +136,18 @@ found:
 	while (!noskip && ((c = gchar_pos(&pos)) == ' ' || c == '\t'))
 	    if (incl(&pos) == -1)
 		break;
+
+	if (EQUAL_POS(prev_pos, pos))
+	{
+	    // didn't actually move, advance one character and try again
+	    if ((*func)(&pos) == -1)
+	    {
+		if (count)
+		    return FAIL;
+		break;
+	    }
+	    ++count;
+	}
     }
 
     setpcmark();
@@ -268,6 +283,10 @@ startPS(linenr_T lnum, int para, int both)
     char_u	*s;
 
     s = ml_get(lnum);
+    if (para == '(')
+	return *s == '(';
+    if (para == ')')
+	return *s == ')';
     if (*s == para || *s == '\f' || (both && *s == '}'))
 	return TRUE;
     if (*s == '.' && (inmacro(p_sections, s + 1) ||
@@ -1332,7 +1351,7 @@ again:
 	curwin->w_cursor = old_pos;
 	goto theend;
     }
-    spat = alloc(len + 31);
+    spat = alloc(len + 39);
     epat = alloc(len + 9);
     if (spat == NULL || epat == NULL)
     {
@@ -1341,7 +1360,7 @@ again:
 	curwin->w_cursor = old_pos;
 	goto theend;
     }
-    sprintf((char *)spat, "<%.*s\\>\\%%(\\s\\_[^>]\\{-}[^/]>\\|>\\)\\c", len, p);
+    sprintf((char *)spat, "<%.*s\\>\\%%(\\_s\\_[^>]\\{-}\\_[^/]>\\|\\_s\\?>\\)\\c", len, p);
     sprintf((char *)epat, "</%.*s>\\c", len, p);
 
     r = do_searchpair(spat, (char_u *)"", epat, FORWARD, NULL,

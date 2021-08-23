@@ -1,10 +1,7 @@
 " Test 'statusline'
 "
 " Not tested yet:
-"   %a
 "   %N
-"   %T
-"   %X
 
 source view_util.vim
 source check.vim
@@ -64,7 +61,17 @@ endfunc
 func Test_statusline()
   CheckFeature quickfix
 
-  new Xstatusline
+  " %a: Argument list ({current} of {max})
+  set statusline=%a
+  call assert_match('^\s*$', s:get_statusline())
+  arglocal a1 a2
+  rewind
+  call assert_match('^ (1 of 2)\s*$', s:get_statusline())
+  next
+  call assert_match('^ (2 of 2)\s*$', s:get_statusline())
+  e Xstatusline
+  call assert_match('^ ((2) of 2)\s*$', s:get_statusline())
+
   only
   set laststatus=2
   set splitbelow
@@ -94,6 +101,18 @@ func Test_statusline()
   " %F: Full path to the file in the buffer.
   set statusline=%F
   call assert_match('/testdir/Xstatusline\s*$', s:get_statusline())
+
+  " Test for min and max width with %(. For some reason, if this test is moved
+  " after the below test for the help buffer flag, then the code to truncate
+  " the string is not executed.
+  set statusline=%015(%f%)
+  call assert_match('^    Xstatusline\s*$', s:get_statusline())
+  set statusline=%.6(%f%)
+  call assert_match('^<sline\s*$', s:get_statusline())
+  set statusline=%14f
+  call assert_match('^   Xstatusline\s*$', s:get_statusline())
+  set statusline=%.4L
+  call assert_match('^10>3\s*$', s:get_statusline())
 
   " %h: Help buffer flag, text is "[help]".
   " %H: Help buffer flag, text is ",HLP".
@@ -357,6 +376,21 @@ func Test_statusline()
   delfunc GetNested
   delfunc GetStatusLine
 
+  " Test statusline works with 80+ items
+  function! StatusLabel()
+    redrawstatus
+    return '[label]'	
+  endfunc
+  let statusline = '%{StatusLabel()}'
+  for i in range(150)
+    let statusline .= '%#TabLine' . (i % 2 == 0 ? 'Fill' : 'Sel') . '#' . string(i)[0]
+  endfor
+  let &statusline = statusline
+  redrawstatus
+  set statusline&
+  delfunc StatusLabel
+
+
   " Check statusline in current and non-current window
   " with the 'fillchars' option.
   set fillchars=stl:^,stlnc:=,vert:\|,fold:-,diff:-
@@ -413,3 +447,37 @@ func Test_statusline_removed_group()
   call StopVimInTerminal(buf)
   call delete('XTest_statusline')
 endfunc
+
+func Test_statusline_after_split_vsplit()
+  only
+
+  " Make the status line of each window show the window number.
+  set ls=2 stl=%{winnr()}
+
+  split | redraw
+  vsplit | redraw
+
+  " The status line of the third window should read '3' here.
+  call assert_equal('3', nr2char(screenchar(&lines - 1, 1)))
+
+  only
+  set ls& stl&
+endfunc
+
+" Test using a multibyte character for 'stl' and 'stlnc' items in 'fillchars'
+" with a custom 'statusline'
+func Test_statusline_mbyte_fillchar()
+  only
+  set laststatus=2
+  set fillchars=vert:\|,fold:-,stl:━,stlnc:═
+  set statusline=a%=b
+  call assert_match('^a\+━\+b$', s:get_statusline())
+  vnew
+  call assert_match('^a\+━\+b━a\+═\+b$', s:get_statusline())
+  wincmd w
+  call assert_match('^a\+═\+b═a\+━\+b$', s:get_statusline())
+  set statusline& fillchars& laststatus&
+  %bw!
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab

@@ -1,6 +1,7 @@
 " Test editing line in Ex mode (see :help Q and :help gQ).
 
 source check.vim
+source shared.vim
 
 " Helper function to test editing line in Q Ex mode
 func Ex_Q(cmd)
@@ -166,6 +167,62 @@ func Test_ex_mode_errors()
   endtry
   call assert_equal(1, caught_e565)
   au! InsertCharPre
+
+  new
+  au CmdLineEnter * call ExEnterFunc()
+  func ExEnterFunc()
+
+  endfunc
+  call feedkeys("gQvi\r", 'xt')
+
+  au! CmdLineEnter
+  delfunc ExEnterFunc
+  quit
+endfunc
+
+func Test_ex_mode_with_global()
+  CheckNotGui
+  CheckFeature timers
+
+  " This will get stuck in Normal mode after the failed "J", use a timer to
+  " get going again.
+  let lines =<< trim END
+    call ch_logfile('logfile', 'w')
+    pedit
+    func FeedQ(id)
+      call feedkeys('Q', 't')
+    endfunc
+    call timer_start(10, 'FeedQ')
+    g/^/vi|HJ
+    call writefile(['done'], 'Xdidexmode')
+    qall!
+  END
+  call writefile(lines, 'Xexmodescript')
+  call assert_equal(1, RunVim([], [], '-e -s -S Xexmodescript'))
+  call assert_equal(['done'], readfile('Xdidexmode'))
+
+  call delete('logfile')
+  call delete('Xdidexmode')
+  call delete('Xexmodescript')
+endfunc
+
+func Test_ex_mode_count_overflow()
+  " The multiplication causes an integer overflow
+  CheckNotAsan
+
+  " this used to cause a crash
+  let lines =<< trim END
+    call feedkeys("\<Esc>Q\<CR>")
+    v9|9silent! vi|333333233333y32333333%O
+    call writefile(['done'], 'Xdidexmode')
+    qall!
+  END
+  call writefile(lines, 'Xexmodescript')
+  call assert_equal(1, RunVim([], [], '-e -s -S Xexmodescript -c qa'))
+  call assert_equal(['done'], readfile('Xdidexmode'))
+
+  call delete('Xdidexmode')
+  call delete('Xexmodescript')
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

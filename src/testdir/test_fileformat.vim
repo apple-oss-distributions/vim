@@ -1,3 +1,4 @@
+" Test for 'fileformat'
 
 " Test behavior of fileformat after bwipeout of last buffer
 func Test_fileformat_after_bw()
@@ -30,6 +31,15 @@ func Test_fileformat_autocommand()
   let &ffs = ffs
   au! BufReadPre Xfile
   bw!
+endfunc
+
+func Test_fileformat_nomodifiable()
+  new
+  setlocal nomodifiable
+
+  call assert_fails('set fileformat=latin1', 'E21:')
+
+  bw
 endfunc
 
 " Convert the contents of a file into a literal string

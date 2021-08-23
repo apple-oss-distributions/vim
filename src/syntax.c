@@ -30,6 +30,8 @@
 static char *(spo_name_tab[SPO_COUNT]) =
 	    {"ms=", "me=", "hs=", "he=", "rs=", "re=", "lc="};
 
+static char e_illegal_arg[] = N_("E390: Illegal argument: %s");
+
 /*
  * The patterns that are being searched for are stored in a syn_pattern.
  * A match item consists of one pattern.
@@ -2604,8 +2606,6 @@ update_si_attr(int idx)
 	{
 	    sip->si_attr = CUR_STATE(idx - 1).si_attr;
 	    sip->si_trans_id = CUR_STATE(idx - 1).si_trans_id;
-	    sip->si_h_startpos = CUR_STATE(idx - 1).si_h_startpos;
-	    sip->si_h_endpos = CUR_STATE(idx - 1).si_h_endpos;
 	    if (sip->si_cont_list == NULL)
 	    {
 		sip->si_flags |= HL_TRANS_CONT;
@@ -3340,7 +3340,7 @@ syn_cmd_conceal(exarg_T *eap UNUSED, int syncing UNUSED)
     else if (STRNICMP(arg, "off", 3) == 0 && next - arg == 3)
 	curwin->w_s->b_syn_conceal = FALSE;
     else
-	semsg(_("E390: Illegal argument: %s"), arg);
+	semsg(_(e_illegal_arg), arg);
 #endif
 }
 
@@ -3370,7 +3370,49 @@ syn_cmd_case(exarg_T *eap, int syncing UNUSED)
     else if (STRNICMP(arg, "ignore", 6) == 0 && next - arg == 6)
 	curwin->w_s->b_syn_ic = TRUE;
     else
-	semsg(_("E390: Illegal argument: %s"), arg);
+	semsg(_(e_illegal_arg), arg);
+}
+
+/*
+ * Handle ":syntax foldlevel" command.
+ */
+    static void
+syn_cmd_foldlevel(exarg_T *eap, int syncing UNUSED)
+{
+    char_u *arg = eap->arg;
+    char_u *arg_end;
+
+    eap->nextcmd = find_nextcmd(arg);
+    if (eap->skip)
+	return;
+
+    if (*arg == NUL)
+    {
+	switch (curwin->w_s->b_syn_foldlevel)
+	{
+	    case SYNFLD_START:   msg(_("syntax foldlevel start"));   break;
+	    case SYNFLD_MINIMUM: msg(_("syntax foldlevel minimum")); break;
+	    default: break;
+	}
+	return;
+    }
+
+    arg_end = skiptowhite(arg);
+    if (STRNICMP(arg, "start", 5) == 0 && arg_end - arg == 5)
+	curwin->w_s->b_syn_foldlevel = SYNFLD_START;
+    else if (STRNICMP(arg, "minimum", 7) == 0 && arg_end - arg == 7)
+	curwin->w_s->b_syn_foldlevel = SYNFLD_MINIMUM;
+    else
+    {
+	semsg(_(e_illegal_arg), arg);
+	return;
+    }
+
+    arg = skipwhite(arg_end);
+    if (*arg != NUL)
+    {
+	semsg(_(e_illegal_arg), arg);
+    }
 }
 
 /*
@@ -3404,7 +3446,7 @@ syn_cmd_spell(exarg_T *eap, int syncing UNUSED)
 	curwin->w_s->b_syn_spell = SYNSPL_DEFAULT;
     else
     {
-	semsg(_("E390: Illegal argument: %s"), arg);
+	semsg(_(e_illegal_arg), arg);
 	return;
     }
 
@@ -3476,6 +3518,7 @@ syntax_clear(synblock_T *block)
     block->b_syn_slow = FALSE;	    // clear previous timeout
 #endif
     block->b_syn_ic = FALSE;	    // Use case, by default
+    block->b_syn_foldlevel = SYNFLD_START;
     block->b_syn_spell = SYNSPL_DEFAULT; // default spell checking
     block->b_syn_containedin = FALSE;
 #ifdef FEAT_CONCEAL
@@ -3824,9 +3867,14 @@ syn_cmd_list(
 		msg_puts(_("no syncing"));
 	    else
 	    {
-		msg_puts(_("syncing starts "));
-		msg_outnum(curwin->w_s->b_syn_sync_minlines);
-		msg_puts(_(" lines before top line"));
+		if (curwin->w_s->b_syn_sync_minlines == MAXLNUM)
+		    msg_puts(_("syncing starts at the first line"));
+		else
+		{
+		    msg_puts(_("syncing starts "));
+		    msg_outnum(curwin->w_s->b_syn_sync_minlines);
+		    msg_puts(_(" lines before top line"));
+		}
 		syn_match_msg();
 	    }
 	    return;
@@ -3890,19 +3938,24 @@ syn_lines_msg(void)
 				      || curwin->w_s->b_syn_sync_minlines > 0)
     {
 	msg_puts("; ");
-	if (curwin->w_s->b_syn_sync_minlines > 0)
+	if (curwin->w_s->b_syn_sync_minlines == MAXLNUM)
+	    msg_puts(_("from the first line"));
+	else
 	{
-	    msg_puts(_("minimal "));
-	    msg_outnum(curwin->w_s->b_syn_sync_minlines);
-	    if (curwin->w_s->b_syn_sync_maxlines)
-		msg_puts(", ");
+	    if (curwin->w_s->b_syn_sync_minlines > 0)
+	    {
+		msg_puts(_("minimal "));
+		msg_outnum(curwin->w_s->b_syn_sync_minlines);
+		if (curwin->w_s->b_syn_sync_maxlines)
+		    msg_puts(", ");
+	    }
+	    if (curwin->w_s->b_syn_sync_maxlines > 0)
+	    {
+		msg_puts(_("maximal "));
+		msg_outnum(curwin->w_s->b_syn_sync_maxlines);
+	    }
+	    msg_puts(_(" lines before top line"));
 	}
-	if (curwin->w_s->b_syn_sync_maxlines > 0)
-	{
-	    msg_puts(_("maximal "));
-	    msg_outnum(curwin->w_s->b_syn_sync_maxlines);
-	}
-	msg_puts(_(" lines before top line"));
     }
 }
 
@@ -4607,7 +4660,7 @@ get_syn_options(
 		arg = skiptowhite(arg);
 		if (gname_start == arg)
 		    return NULL;
-		gname = vim_strnsave(gname_start, (int)(arg - gname_start));
+		gname = vim_strnsave(gname_start, arg - gname_start);
 		if (gname == NULL)
 		    return NULL;
 		if (STRCMP(gname, "NONE") == 0)
@@ -4617,7 +4670,8 @@ get_syn_options(
 		    syn_id = syn_name2id(gname);
 		    for (i = curwin->w_s->b_syn_patterns.ga_len; --i >= 0; )
 			if (SYN_ITEMS(curwin->w_s)[i].sp_syn.id == syn_id
-			      && SYN_ITEMS(curwin->w_s)[i].sp_type == SPTYPE_START)
+			      && SYN_ITEMS(curwin->w_s)[i].sp_type
+							       == SPTYPE_START)
 			{
 			    *opt->sync_idx = i;
 			    break;
@@ -5052,7 +5106,7 @@ syn_cmd_region(
 	while (*key_end && !VIM_ISWHITE(*key_end) && *key_end != '=')
 	    ++key_end;
 	vim_free(key);
-	key = vim_strnsave_up(rest, (int)(key_end - rest));
+	key = vim_strnsave_up(rest, key_end - rest);
 	if (key == NULL)			// out of memory
 	{
 	    rest = NULL;
@@ -5611,12 +5665,12 @@ get_syn_pattern(char_u *arg, synpat_T *ci)
 	return NULL;
     }
     // store the pattern and compiled regexp program
-    if ((ci->sp_pattern = vim_strnsave(arg + 1, (int)(end - arg - 1))) == NULL)
+    if ((ci->sp_pattern = vim_strnsave(arg + 1, end - arg - 1)) == NULL)
 	return NULL;
 
     // Make 'cpoptions' empty, to avoid the 'l' flag
     cpo_save = p_cpo;
-    p_cpo = (char_u *)"";
+    p_cpo = empty_option;
     ci->sp_prog = vim_regcomp(ci->sp_pattern, RE_MAGIC);
     p_cpo = cpo_save;
 
@@ -5717,7 +5771,9 @@ syn_cmd_sync(exarg_T *eap, int syncing UNUSED)
 	arg_end = skiptowhite(arg_start);
 	next_arg = skipwhite(arg_end);
 	vim_free(key);
-	key = vim_strnsave_up(arg_start, (int)(arg_end - arg_start));
+	key = vim_strnsave_up(arg_start, arg_end - arg_start);
+	if (key == NULL)
+	    break;
 	if (STRCMP(key, "CCOMMENT") == 0)
 	{
 	    if (!eap->skip)
@@ -5791,8 +5847,9 @@ syn_cmd_sync(exarg_T *eap, int syncing UNUSED)
 	    if (!eap->skip)
 	    {
 		// store the pattern and compiled regexp program
-		if ((curwin->w_s->b_syn_linecont_pat = vim_strnsave(next_arg + 1,
-				      (int)(arg_end - next_arg - 1))) == NULL)
+		if ((curwin->w_s->b_syn_linecont_pat =
+			    vim_strnsave(next_arg + 1,
+				      arg_end - next_arg - 1)) == NULL)
 		{
 		    finished = TRUE;
 		    break;
@@ -5801,7 +5858,7 @@ syn_cmd_sync(exarg_T *eap, int syncing UNUSED)
 
 		// Make 'cpoptions' empty, to avoid the 'l' flag
 		cpo_save = p_cpo;
-		p_cpo = (char_u *)"";
+		p_cpo = empty_option;
 		curwin->w_s->b_syn_linecont_prog =
 		       vim_regcomp(curwin->w_s->b_syn_linecont_pat, RE_MAGIC);
 		p_cpo = cpo_save;
@@ -6192,6 +6249,7 @@ static struct subcommand subcommands[] =
     {"cluster",		syn_cmd_cluster},
     {"conceal",		syn_cmd_conceal},
     {"enable",		syn_cmd_enable},
+    {"foldlevel",	syn_cmd_foldlevel},
     {"include",		syn_cmd_include},
     {"iskeyword",	syn_cmd_iskeyword},
     {"keyword",		syn_cmd_keyword},
@@ -6226,7 +6284,7 @@ ex_syntax(exarg_T *eap)
     // isolate subcommand name
     for (subcmd_end = arg; ASCII_ISALPHA(*subcmd_end); ++subcmd_end)
 	;
-    subcmd_name = vim_strnsave(arg, (int)(subcmd_end - arg));
+    subcmd_name = vim_strnsave(arg, subcmd_end - arg);
     if (subcmd_name != NULL)
     {
 	if (eap->skip)		// skip error messages for all subcommands
@@ -6266,9 +6324,11 @@ ex_ownsyntax(exarg_T *eap)
 #ifdef FEAT_SPELL
 	// TODO: keep the spell checking as it was.
 	curwin->w_p_spell = FALSE;	// No spell checking
+	// make sure option values are "empty_option" instead of NULL
 	clear_string_option(&curwin->w_s->b_p_spc);
 	clear_string_option(&curwin->w_s->b_p_spf);
 	clear_string_option(&curwin->w_s->b_p_spl);
+	clear_string_option(&curwin->w_s->b_p_spo);
 #endif
 	clear_string_option(&curwin->w_s->b_syn_isk);
     }
@@ -6489,6 +6549,18 @@ syn_get_stack_item(int i)
 #endif
 
 #if defined(FEAT_FOLDING) || defined(PROTO)
+    static int
+syn_cur_foldlevel(void)
+{
+    int		level = 0;
+    int		i;
+
+    for (i = 0; i < current_state.ga_len; ++i)
+	if (CUR_STATE(i).si_flags & HL_FOLD)
+	    ++level;
+    return level;
+}
+
 /*
  * Function called to get folding level for line "lnum" in window "wp".
  */
@@ -6496,7 +6568,8 @@ syn_get_stack_item(int i)
 syn_get_foldlevel(win_T *wp, long lnum)
 {
     int		level = 0;
-    int		i;
+    int		low_level;
+    int		cur_level;
 
     // Return quickly when there are no fold items at all.
     if (wp->w_s->b_syn_folditems != 0
@@ -6508,9 +6581,25 @@ syn_get_foldlevel(win_T *wp, long lnum)
     {
 	syntax_start(wp, lnum);
 
-	for (i = 0; i < current_state.ga_len; ++i)
-	    if (CUR_STATE(i).si_flags & HL_FOLD)
-		++level;
+	// Start with the fold level at the start of the line.
+	level = syn_cur_foldlevel();
+
+	if (wp->w_s->b_syn_foldlevel == SYNFLD_MINIMUM)
+	{
+	    // Find the lowest fold level that is followed by a higher one.
+	    cur_level = level;
+	    low_level = cur_level;
+	    while (!current_finished)
+	    {
+		(void)syn_current_attr(FALSE, FALSE, NULL, FALSE);
+		cur_level = syn_cur_foldlevel();
+		if (cur_level < low_level)
+		    low_level = cur_level;
+		else if (cur_level > low_level)
+		    level = low_level;
+		++current_col;
+	    }
+	}
     }
     if (level > wp->w_p_fdn)
     {
@@ -6616,7 +6705,7 @@ syntime_report(void)
 {
     int		idx;
     synpat_T	*spp;
-# ifdef FEAT_FLOAT
+# if defined(FEAT_RELTIME) && defined(FEAT_FLOAT)
     proftime_T	tm;
 # endif
     int		len;
@@ -6646,7 +6735,7 @@ syntime_report(void)
 	    p->match = spp->sp_time.match;
 	    total_count += spp->sp_time.count;
 	    p->slowest = spp->sp_time.slowest;
-# ifdef FEAT_FLOAT
+# if defined(FEAT_RELTIME) && defined(FEAT_FLOAT)
 	    profile_divide(&spp->sp_time.total, spp->sp_time.count, &tm);
 	    p->average = tm;
 # endif

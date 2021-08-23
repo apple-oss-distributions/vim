@@ -602,6 +602,12 @@ set_file_time(
 }
 #endif // UNIX
 
+    char *
+new_file_message(void)
+{
+    return shortmess(SHM_NEW) ? _("[New]") : _("[New File]");
+}
+
 /*
  * buf_write() - write to file "fname" lines "start" through "end"
  *
@@ -884,7 +890,7 @@ buf_write(
 #endif
 				       )
 	{
-	    if (buf != NULL && cmdmod.lockmarks)
+	    if (buf != NULL && (cmdmod.cmod_flags & CMOD_LOCKMARKS))
 	    {
 		// restore the original '[ and '] positions
 		buf->b_op_start = orig_start;
@@ -968,7 +974,7 @@ buf_write(
 	    fname = buf->b_sfname;
     }
 
-    if (cmdmod.lockmarks)
+    if (cmdmod.cmod_flags & CMOD_LOCKMARKS)
     {
 	// restore the original '[ and '] positions
 	buf->b_op_start = orig_start;
@@ -1509,6 +1515,9 @@ buf_write(
 #if defined(HAVE_SELINUX) || defined(HAVE_SMACK)
 			mch_copy_sec(fname, backup);
 #endif
+#ifdef MSWIN
+			(void)mch_copy_file_attribute(fname, backup);
+#endif
 			break;
 		    }
 		}
@@ -1921,12 +1930,7 @@ restore_backup:
 
 #if defined(MSWIN)
 	    if (backup != NULL && overwriting && !append)
-	    {
-		if (backup_copy)
-		    (void)mch_copy_file_attribute(wfname, backup);
-		else
-		    (void)mch_copy_file_attribute(backup, wfname);
-	    }
+		(void)mch_copy_file_attribute(backup, wfname);
 
 	    if (!overwriting && !append)
 	    {
@@ -2043,7 +2047,7 @@ restore_backup:
 	    if (end == 0
 		    || (lnum == end
 			&& (write_bin || !buf->b_p_fixeol)
-			&& (lnum == buf->b_no_eol_lnum
+			&& ((write_bin && lnum == buf->b_no_eol_lnum)
 			    || (lnum == buf->b_ml.ml_line_count
 							   && !buf->b_p_eol))))
 	    {
@@ -2150,7 +2154,7 @@ restore_backup:
     if (!checking_conversion)
     {
 #if defined(UNIX) && defined(HAVE_FSYNC)
-	// On many journalling file systems there is a bug that causes both the
+	// On many journaling file systems there is a bug that causes both the
 	// original and the backup file to be lost when halting the system
 	// right after writing the file.  That's because only the meta-data is
 	// journalled.  Syncing the file slows down the system, but assures it
@@ -2368,7 +2372,7 @@ restore_backup:
 	}
 	else if (newfile)
 	{
-	    STRCAT(IObuff, shortmess(SHM_NEW) ? _("[New]") : _("[New File]"));
+	    STRCAT(IObuff, new_file_message());
 	    c = TRUE;
 	}
 	if (no_eol)
@@ -2597,6 +2601,12 @@ nofail:
 	    retval = FALSE;
 #endif
     }
+
+#ifdef FEAT_VIMINFO
+    // Make sure marks will be written out to the viminfo file later, even when
+    // the file is new.
+    curbuf->b_marks_read = TRUE;
+#endif
 
     got_int |= prev_got_int;
 

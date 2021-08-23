@@ -5,6 +5,8 @@ if exists('*CanRunVimInTerminal')
   finish
 endif
 
+source shared.vim
+
 " For most tests we need to be able to run terminal Vim with 256 colors.  On
 " MS-Windows the console only has 16 colors and the GUI can't run in a
 " terminal.
@@ -28,10 +30,12 @@ endfunc
 " The second argument is the minimum time to wait in msec, 10 if omitted.
 func TermWait(buf, ...)
   let wait_time = a:0 ? a:1 : 10
-  if g:run_nr == 2
-    let wait_time *= 4
-  elseif g:run_nr > 2
-    let wait_time *= 10
+  if exists('g:run_nr')
+    if g:run_nr == 2
+      let wait_time *= 4
+    elseif g:run_nr > 2
+      let wait_time *= 10
+    endif
   endif
   call term_wait(a:buf, wait_time)
 
@@ -44,9 +48,12 @@ endfunc
 " Returns the buffer number of the terminal.
 "
 " Options is a dictionary, these items are recognized:
+" "keep_t_u7" - when 1 do not make t_u7 empty (resetting t_u7 avoids clearing
+"               parts of line 2 and 3 on the display)
 " "rows" - height of the terminal window (max. 20)
 " "cols" - width of the terminal window (max. 78)
 " "statusoff" - number of lines the status is offset from default
+" "wait_for_ruler" - if zero then don't wait for ruler to show
 func RunVimInTerminal(arguments, options)
   " If Vim doesn't exit a swap file remains, causing other tests to fail.
   " Remove it here.
@@ -69,18 +76,26 @@ func RunVimInTerminal(arguments, options)
   set t_Co=256 background=light
   hi Normal ctermfg=NONE ctermbg=NONE
 
-  " Make the window 20 lines high and 75 columns, unless told otherwise.
+  " Make the window 20 lines high and 75 columns, unless told otherwise or
+  " 'termwinsize' is set.
   let rows = get(a:options, 'rows', 20)
   let cols = get(a:options, 'cols', 75)
   let statusoff = get(a:options, 'statusoff', 1)
 
-  let cmd = GetVimCommandCleanTerm() .. a:arguments
+  if get(a:options, 'keep_t_u7', 0)
+    let reset_u7 = ''
+  else
+    let reset_u7 = ' --cmd "set t_u7=" '
+  endif
 
-  let options = {
-	\ 'curwin': 1,
-	\ 'term_rows': rows,
-	\ 'term_cols': cols,
-	\ }
+  let cmd = GetVimCommandCleanTerm() .. reset_u7 .. a:arguments
+
+  let options = #{curwin: 1}
+  if &termwinsize == ''
+    let options.term_rows = rows
+    let options.term_cols = cols
+  endif
+
   " Accept other options whose name starts with 'term_'.
   call extend(options, filter(copy(a:options), 'v:key =~# "^term_"'))
 
@@ -99,16 +114,18 @@ func RunVimInTerminal(arguments, options)
 
   call TermWait(buf)
 
-  " Wait for "All" or "Top" of the ruler to be shown in the last line or in
-  " the status line of the last window. This can be quite slow (e.g. when
-  " using valgrind).
-  " If it fails then show the terminal contents for debugging.
-  try
-    call WaitFor({-> len(term_getline(buf, rows)) >= cols - 1 || len(term_getline(buf, rows - statusoff)) >= cols - 1})
-  catch /timed out after/
-    let lines = map(range(1, rows), {key, val -> term_getline(buf, val)})
-    call assert_report('RunVimInTerminal() failed, screen contents: ' . join(lines, "<NL>"))
-  endtry
+  if get(a:options, 'wait_for_ruler', 1)
+    " Wait for "All" or "Top" of the ruler to be shown in the last line or in
+    " the status line of the last window. This can be quite slow (e.g. when
+    " using valgrind).
+    " If it fails then show the terminal contents for debugging.
+    try
+      call WaitFor({-> len(term_getline(buf, rows)) >= cols - 1 || len(term_getline(buf, rows - statusoff)) >= cols - 1})
+    catch /timed out after/
+      let lines = map(range(1, rows), {key, val -> term_getline(buf, val)})
+      call assert_report('RunVimInTerminal() failed, screen contents: ' . join(lines, "<NL>"))
+    endtry
+  endif
 
   " Starting a terminal to run Vim is always considered flaky.
   let g:test_is_flaky = 1
@@ -117,7 +134,7 @@ func RunVimInTerminal(arguments, options)
 endfunc
 
 " Stop a Vim running in terminal buffer "buf".
-func StopVimInTerminal(buf)
+func StopVimInTerminal(buf, kill = 1)
   " Using a terminal to run Vim is always considered flaky.
   let g:test_is_flaky = 1
 
@@ -130,8 +147,41 @@ func StopVimInTerminal(buf)
   " Wait for all the pending updates to terminal to complete
   call TermWait(a:buf)
 
+  " Wait for the terminal to end.
   call WaitForAssert({-> assert_equal("finished", term_getstatus(a:buf))})
-  only!
+
+  " If the buffer still exists forcefully wipe it.
+  if a:kill && bufexists(a:buf)
+    exe a:buf .. 'bwipe!'
+  endif
+endfunc
+
+" Open a terminal with a shell, assign the job to g:job and return the buffer
+" number.
+func Run_shell_in_terminal(options)
+  if has('win32')
+    let buf = term_start([&shell,'/k'], a:options)
+  else
+    let buf = term_start(&shell, a:options)
+  endif
+  let g:test_is_flaky = 1
+
+  let termlist = term_list()
+  call assert_equal(1, len(termlist))
+  call assert_equal(buf, termlist[0])
+
+  let g:job = term_getjob(buf)
+  call assert_equal(v:t_job, type(g:job))
+
+  let string = string({'job': buf->term_getjob()})
+  call assert_match("{'job': 'process \\d\\+ run'}", string)
+
+  return buf
+endfunc
+
+" Return concatenated lines in terminal.
+func Term_getlines(buf, lines)
+  return join(map(a:lines, 'term_getline(a:buf, v:val)'), '')
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -1,5 +1,6 @@
 " Test for options
 
+source shared.vim
 source check.vim
 source view_util.vim
 
@@ -136,12 +137,11 @@ func Test_path_keep_commas()
 endfunc
 
 func Test_signcolumn()
-  if has('signs')
-    call assert_equal("auto", &signcolumn)
-    set signcolumn=yes
-    set signcolumn=no
-    call assert_fails('set signcolumn=nope')
-  endif
+  CheckFeature signs
+  call assert_equal("auto", &signcolumn)
+  set signcolumn=yes
+  set signcolumn=no
+  call assert_fails('set signcolumn=nope')
 endfunc
 
 func Test_filetype_valid()
@@ -162,9 +162,7 @@ func Test_filetype_valid()
 endfunc
 
 func Test_syntax_valid()
-  if !has('syntax')
-    return
-  endif
+  CheckFeature syntax
   set syn=valid_name
   call assert_equal("valid_name", &syntax)
   set syn=valid-name
@@ -182,9 +180,7 @@ func Test_syntax_valid()
 endfunc
 
 func Test_keymap_valid()
-  if !has('keymap')
-    return
-  endif
+  CheckFeature keymap
   call assert_fails(":set kmp=valid_name", "E544:")
   call assert_fails(":set kmp=valid_name", "valid_name")
   call assert_fails(":set kmp=valid-name", "E544:")
@@ -275,17 +271,17 @@ func Test_set_completion()
 
   " Expand terminal options.
   call feedkeys(":set t_A\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"set t_AB t_AF t_AL', @:)
+  call assert_equal('"set t_AB t_AF t_AU t_AL', @:)
   call assert_fails('call feedkeys(":set <t_afoo>=\<C-A>\<CR>", "xt")', 'E474:')
 
   " Expand directories.
   call feedkeys(":set cdpath=./\<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_match(' ./samples/ ', @:)
-  call assert_notmatch(' ./small.vim ', @:)
+  call assert_notmatch(' ./summarize.vim ', @:)
 
   " Expand files and directories.
   call feedkeys(":set tags=./\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_match(' ./samples/.* ./small.vim', @:)
+  call assert_match(' ./samples/.* ./summarize.vim', @:)
 
   call feedkeys(":set tags=./\\\\ dif\<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_equal('"set tags=./\\ diff diffexpr diffopt', @:)
@@ -336,6 +332,12 @@ func Test_set_completion()
   call feedkeys(":set key=\<Tab>\<C-B>\"\<CR>", 'xt')
   call assert_equal('"set key=*****', @:)
   set key=
+
+  " Expand values for 'filetype'
+  call feedkeys(":set filetype=sshdconfi\<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"set filetype=sshdconfig', @:)
+  call feedkeys(":set filetype=a\<C-A>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"set filetype=' .. getcompletion('a*', 'filetype')->join(), @:)
 endfunc
 
 func Test_set_errors()
@@ -375,9 +377,14 @@ func Test_set_errors()
   call assert_fails('set foldmarker=x', 'E536:')
   call assert_fails('set commentstring=x', 'E537:')
   call assert_fails('set complete=x', 'E539:')
+  call assert_fails('set rulerformat=%-', 'E539:')
+  call assert_fails('set rulerformat=%(', 'E542:')
+  call assert_fails('set rulerformat=%15(%%', 'E542:')
+  call assert_fails('set statusline=%$', 'E539:')
   call assert_fails('set statusline=%{', 'E540:')
-  call assert_fails('set statusline=' . repeat("%p", 81), 'E541:')
   call assert_fails('set statusline=%(', 'E542:')
+  call assert_fails('set statusline=%)', 'E542:')
+
   if has('cursorshape')
     " This invalid value for 'guicursor' used to cause Vim to crash.
     call assert_fails('set guicursor=i-ci,r-cr:h', 'E545:')
@@ -411,10 +418,22 @@ func Test_set_errors()
   call assert_fails('set wildchar=<abc>', 'E474:')
   call assert_fails('set cmdheight=1a', 'E521:')
   call assert_fails('set invcmdheight', 'E474:')
-  if has('python') && has('python3')
+  if has('python') || has('python3')
     call assert_fails('set pyxversion=6', 'E474:')
   endif
   call assert_fails("let &tabstop='ab'", 'E521:')
+  call assert_fails('set spellcapcheck=%\\(', 'E54:')
+  call assert_fails('set sessionoptions=curdir,sesdir', 'E474:')
+  call assert_fails('set foldmarker={{{,', 'E474:')
+  call assert_fails('set sessionoptions=sesdir,curdir', 'E474:')
+  call assert_fails('set listchars=trail:· ambiwidth=double', 'E834:')
+  set listchars&
+  call assert_fails('set fillchars=stl:· ambiwidth=double', 'E835:')
+  set fillchars&
+  call assert_fails('set fileencoding=latin1,utf-8', 'E474:')
+  set nomodifiable
+  call assert_fails('set fileencoding=latin1', 'E21:')
+  set modifiable&
 endfunc
 
 func CheckWasSet(name)
@@ -471,12 +490,10 @@ func Test_set_ttytype()
   set ttytype=xterm
   call assert_equal('xterm', &ttytype)
   call assert_equal(&ttytype, &term)
-  " "set ttytype=" gives E522 instead of E529
-  " in travis on some builds. Why?  Catch both for now
   try
     set ttytype=
     call assert_report('set ttytype= did not fail')
-  catch /E529\|E522/
+  catch /E529/
   endtry
 
   " Some systems accept any terminal name and return dumb settings,
@@ -513,6 +530,7 @@ func Test_set_one_column()
 endfunc
 
 func Test_set_values()
+  " opt_test.vim is generated from ../optiondefs.h using gen_opt_test.vim
   if filereadable('opt_test.vim')
     source opt_test.vim
   else
@@ -590,6 +608,35 @@ func Test_backupskip()
       call assert_true(found, var . ' (' . varvalue . ') not in option bsk: ' . &bsk)
     endif
   endfor
+
+  " Duplicates from environment variables should be filtered out (option has
+  " P_NODUP).  Run this in a separate instance and write v:errors in a file,
+  " so that we see what happens on startup.
+  let after =<< trim [CODE]
+      let bsklist = split(&backupskip, ',')
+      call assert_equal(uniq(copy(bsklist)), bsklist)
+      call writefile(['errors:'] + v:errors, 'Xtestout')
+      qall
+  [CODE]
+  call writefile(after, 'Xafter')
+  let cmd = GetVimProg() . ' --not-a-term -S Xafter --cmd "set enc=utf8"'
+
+  let saveenv = {}
+  for var in ['TMPDIR', 'TMP', 'TEMP']
+    let saveenv[var] = getenv(var)
+    call setenv(var, '/duplicate/path')
+  endfor
+
+  exe 'silent !' . cmd
+  call assert_equal(['errors:'], readfile('Xtestout'))
+
+  " restore environment variables
+  for var in ['TMPDIR', 'TMP', 'TEMP']
+    call setenv(var, saveenv[var])
+  endfor
+
+  call delete('Xtestout')
+  call delete('Xafter')
 
   " Duplicates should be filtered out (option has P_NODUP)
   let backupskip = &backupskip
@@ -789,7 +836,13 @@ func Test_shell()
   CheckUnix
   let save_shell = &shell
   set shell=
-  call assert_fails('shell', 'E91:')
+  let caught_e91 = 0
+  try
+    shell
+  catch /E91:/
+    let caught_e91 = 1
+  endtry
+  call assert_equal(1, caught_e91)
   let &shell = save_shell
 endfunc
 
@@ -919,6 +972,125 @@ func Test_opt_boolean()
   let &nu = v:false
   call assert_equal(0, &nu)
   set number&
+endfunc
+
+" Test for the 'window' option
+func Test_window_opt()
+  " Needs only one open widow
+  %bw!
+  call setline(1, range(1, 8))
+  set window=5
+  exe "normal \<C-F>"
+  call assert_equal(4, line('w0'))
+  exe "normal \<C-F>"
+  call assert_equal(7, line('w0'))
+  exe "normal \<C-F>"
+  call assert_equal(8, line('w0'))
+  exe "normal \<C-B>"
+  call assert_equal(5, line('w0'))
+  exe "normal \<C-B>"
+  call assert_equal(2, line('w0'))
+  exe "normal \<C-B>"
+  call assert_equal(1, line('w0'))
+  set window=1
+  exe "normal gg\<C-F>"
+  call assert_equal(2, line('w0'))
+  exe "normal \<C-F>"
+  call assert_equal(3, line('w0'))
+  exe "normal \<C-B>"
+  call assert_equal(2, line('w0'))
+  exe "normal \<C-B>"
+  call assert_equal(1, line('w0'))
+  enew!
+  set window&
+endfunc
+
+" Test for the 'winminheight' option
+func Test_opt_winminheight()
+  only!
+  let &winheight = &lines + 4
+  call assert_fails('let &winminheight = &lines + 2', 'E36:')
+  call assert_true(&winminheight <= &lines)
+  set winminheight&
+  set winheight&
+endfunc
+
+func Test_opt_winminheight_term()
+  CheckRunVimInTerminal
+
+  " The tabline should be taken into account.
+  let lines =<< trim END
+    set wmh=0 stal=2
+    below sp | wincmd _
+    below sp | wincmd _
+    below sp | wincmd _
+    below sp
+  END
+  call writefile(lines, 'Xwinminheight')
+  let buf = RunVimInTerminal('-S Xwinminheight', #{rows: 11})
+  call term_sendkeys(buf, ":set wmh=1\n")
+  call WaitForAssert({-> assert_match('E36: Not enough room', term_getline(buf, 11))})
+
+  call StopVimInTerminal(buf)
+  call delete('Xwinminheight')
+endfunc
+
+func Test_opt_winminheight_term_tabs()
+  CheckRunVimInTerminal
+
+  " The tabline should be taken into account.
+  let lines =<< trim END
+    set wmh=0 stal=2
+    split
+    split
+    split
+    split
+    tabnew
+  END
+  call writefile(lines, 'Xwinminheight')
+  let buf = RunVimInTerminal('-S Xwinminheight', #{rows: 11})
+  call term_sendkeys(buf, ":set wmh=1\n")
+  call WaitForAssert({-> assert_match('E36: Not enough room', term_getline(buf, 11))})
+
+  call StopVimInTerminal(buf)
+  call delete('Xwinminheight')
+endfunc
+
+" Test for the 'winminwidth' option
+func Test_opt_winminwidth()
+  only!
+  let &winwidth = &columns + 4
+  call assert_fails('let &winminwidth = &columns + 2', 'E36:')
+  call assert_true(&winminwidth <= &columns)
+  set winminwidth&
+  set winwidth&
+endfunc
+
+" Test for setting option value containing spaces with isfname+=32
+func Test_isfname_with_options()
+  set isfname+=32
+  setlocal keywordprg=:term\ help.exe
+  call assert_equal(':term help.exe', &keywordprg)
+  set isfname&
+  setlocal keywordprg&
+endfunc
+
+" Test that resetting laststatus does change scroll option
+func Test_opt_reset_scroll()
+  CheckRunVimInTerminal
+  let vimrc =<< trim [CODE]
+    set scroll=2
+    set laststatus=2
+  [CODE]
+  call writefile(vimrc, 'Xscroll')
+  let buf = RunVimInTerminal('-S Xscroll', {'rows': 16, 'cols': 45})
+  call term_sendkeys(buf, ":verbose set scroll?\n")
+  call WaitForAssert({-> assert_match('Last set.*window size', term_getline(buf, 15))})
+  call assert_match('^\s*scroll=7$', term_getline(buf, 14))
+  call StopVimInTerminal(buf)
+
+  " clean up
+  call delete('Xscroll')
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

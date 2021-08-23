@@ -735,7 +735,7 @@ bufselfcmd(
 		    i = n;
 		    do
 		    {
-			if (ml_delete((linenr_T)i, FALSE) != OK)
+			if (ml_delete((linenr_T)i) != OK)
 			    goto setListError;
 			++n;
 		    } while (n <= val2);
@@ -783,7 +783,7 @@ bufselfcmd(
 	    }
 	    for (i = 0; i < n; i++)
 	    {
-		ml_delete((linenr_T)val1, FALSE);
+		ml_delete((linenr_T)val1);
 		err = vimerror(interp);
 		if (err != TCL_OK)
 		    break;
@@ -1281,7 +1281,7 @@ tclsetoption(
 {
     int		err, nobjs, idx;
     char_u	*option;
-    int		isnum;
+    getoption_T	gov;
     long	lval;
     char_u	*sval;
     Tcl_Obj	*resobj;
@@ -1298,15 +1298,16 @@ tclsetoption(
 
     option = (char_u *)Tcl_GetStringFromObj(objv[objn], NULL);
     ++objn;
-    isnum = get_option_value(option, &lval, &sval, 0);
+    gov = get_option_value(option, &lval, &sval, 0);
     err = TCL_OK;
-    switch (isnum)
+    switch (gov)
     {
-	case 0:
+	case gov_string:
 	    Tcl_SetResult(interp, (char *)sval, TCL_VOLATILE);
 	    vim_free(sval);
 	    break;
-	case 1:
+	case gov_bool:
+	case gov_number:
 	    resobj = Tcl_NewLongObj(lval);
 	    Tcl_SetObjResult(interp, resobj);
 	    break;
@@ -1316,7 +1317,7 @@ tclsetoption(
     }
     if (nobjs == 2)
     {
-	if (isnum)
+	if (gov != gov_string)
 	{
 	    sval = NULL;    // avoid compiler warning
 	    err = Tcl_GetIndexFromObj(interp, objv[objn], optkw, "", 0, &idx);
@@ -1326,17 +1327,19 @@ tclsetoption(
 		err = Tcl_GetLongFromObj(interp, objv[objn], &lval);
 	    }
 	    else
-	    switch (idx)
 	    {
-		case OPT_ON:
-		    lval = 1;
-		    break;
-		case OPT_OFF:
-		    lval = 0;
-		    break;
-		case OPT_TOGGLE:
-		    lval = !lval;
-		    break;
+		switch (idx)
+		{
+		    case OPT_ON:
+			lval = 1;
+			break;
+		    case OPT_OFF:
+			lval = 0;
+			break;
+		    case OPT_TOGGLE:
+			lval = !lval;
+			break;
+		}
 	    }
 	}
 	else
@@ -1373,7 +1376,7 @@ tclvimexpr(
 
 #ifdef FEAT_EVAL
     expr = Tcl_GetStringFromObj(objv[objn], NULL);
-    str = (char *)eval_to_string((char_u *)expr, NULL, TRUE);
+    str = (char *)eval_to_string((char_u *)expr, TRUE);
     if (str == NULL)
 	Tcl_SetResult(interp, _("invalid expression"), TCL_STATIC);
     else

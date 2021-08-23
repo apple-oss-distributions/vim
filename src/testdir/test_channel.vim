@@ -29,14 +29,14 @@ func SetUp()
   endif
   let s:chopt = {}
   call ch_log(g:testfunc)
+
+  " Most tests use job_start(), which can be flaky
+  let g:test_is_flaky = 1
 endfunc
 
 " Run "testfunc" after starting the server and stop the server afterwards.
 func s:run_server(testfunc, ...)
   call RunServer(s:testscript, a:testfunc, a:000)
-
-  " communicating with a server can be flaky
-  let g:test_is_flaky = 1
 endfunc
 
 " Return a list of open files.
@@ -163,11 +163,11 @@ func Ch_communicate(port)
   eval handle->ch_setoptions({'callback': 's:NotUsed'})
   call ch_setoptions(handle, {'timeout': 1111})
   call ch_setoptions(handle, {'mode': 'json'})
-  call assert_fails("call ch_setoptions(handle, {'waittime': 111})", "E475")
+  call assert_fails("call ch_setoptions(handle, {'waittime': 111})", 'E475:')
   call ch_setoptions(handle, {'callback': ''})
   call ch_setoptions(handle, {'drop': 'never'})
   call ch_setoptions(handle, {'drop': 'auto'})
-  call assert_fails("call ch_setoptions(handle, {'drop': 'bad'})", "E475")
+  call assert_fails("call ch_setoptions(handle, {'drop': 'bad'})", 'E475:')
   call assert_equal(0, ch_setoptions(handle, test_null_dict()))
   call assert_equal(0, ch_setoptions(test_null_channel(), {'drop' : 'never'}))
 
@@ -455,7 +455,6 @@ endfunc
 func Test_connect_waittime()
   CheckFunction reltimefloat
   " this is timing sensitive
-  let g:test_is_flaky = 1
 
   let start = reltime()
   let handle = ch_open('localhost:9876', s:chopt)
@@ -560,7 +559,7 @@ func Test_raw_pipe()
   call assert_equal(1, found)
 
   call assert_fails("call job_stop('abc')", 'E475:')
-  call assert_fails("call job_stop(job, [])", 'E474:')
+  call assert_fails("call job_stop(job, [])", 'E730:')
   call assert_fails("call job_stop(test_null_job())", 'E916:')
 
   " Try to use the job and channel where a number is expected. This is not
@@ -1349,9 +1348,7 @@ endfunction
 " This caused a crash, because messages were handled while peeking for a
 " character.
 func Test_exit_cb_wipes_buf()
-  if !has('timers')
-    return
-  endif
+  CheckFeature timers
   set cursorline lazyredraw
   call test_override('redraw_flag', 1)
   new
@@ -1642,15 +1639,15 @@ func Test_job_start_fails()
   call assert_fails("call job_start('ls', {'in_top' : -1})", 'E475:')
   call assert_fails("call job_start('ls', {'in_bot' : -1})", 'E475:')
   call assert_fails("call job_start('ls', {'channel' : -1})", 'E475:')
-  call assert_fails("call job_start('ls', {'callback' : -1})", 'E475:')
-  call assert_fails("call job_start('ls', {'out_cb' : -1})", 'E475:')
-  call assert_fails("call job_start('ls', {'err_cb' : -1})", 'E475:')
-  call assert_fails("call job_start('ls', {'close_cb' : -1})", 'E475:')
-  call assert_fails("call job_start('ls', {'exit_cb' : -1})", 'E475:')
+  call assert_fails("call job_start('ls', {'callback' : -1})", 'E921:')
+  call assert_fails("call job_start('ls', {'out_cb' : -1})", 'E921:')
+  call assert_fails("call job_start('ls', {'err_cb' : -1})", 'E921:')
+  call assert_fails("call job_start('ls', {'close_cb' : -1})", 'E921:')
+  call assert_fails("call job_start('ls', {'exit_cb' : -1})", 'E921:')
   call assert_fails("call job_start('ls', {'term_name' : []})", 'E475:')
   call assert_fails("call job_start('ls', {'term_finish' : 'run'})", 'E475:')
   call assert_fails("call job_start('ls', {'term_api' : []})", 'E475:')
-  call assert_fails("call job_start('ls', {'stoponexit' : []})", 'E475:')
+  call assert_fails("call job_start('ls', {'stoponexit' : []})", 'E730:')
   call assert_fails("call job_start('ls', {'in_io' : 'file'})", 'E920:')
   call assert_fails("call job_start('ls', {'out_io' : 'file'})", 'E920:')
   call assert_fails("call job_start('ls', {'err_io' : 'file'})", 'E920:')
@@ -1762,9 +1759,8 @@ func Test_write_to_deleted_buffer()
 endfunc
 
 func Test_cmd_parsing()
-  if !has('unix')
-    return
-  endif
+  CheckUnix
+
   call assert_false(filereadable("file with space"))
   let job = job_start('touch "file with space"')
   call WaitForAssert({-> assert_true(filereadable("file with space"))})
@@ -1963,9 +1959,7 @@ func Test_list_args()
 endfunc
 
 func Test_keep_pty_open()
-  if !has('unix')
-    return
-  endif
+  CheckUnix
 
   let job = job_start(s:python . ' -c "import time;time.sleep(0.2)"',
         \ {'out_io': 'null', 'err_io': 'null', 'pty': 1})
@@ -2047,9 +2041,7 @@ func Test_no_hang_windows()
 endfunc
 
 func Test_job_exitval_and_termsig()
-  if !has('unix')
-    return
-  endif
+  CheckUnix
 
   " Terminate job normally
   let cmd = ['echo']
@@ -2123,6 +2115,7 @@ endfunc
 
 " Do this last, it stops any channel log.
 func Test_zz_nl_err_to_out_pipe()
+
   eval 'Xlog'->ch_logfile()
   call ch_log('Test_zz_nl_err_to_out_pipe()')
   let job = job_start(s:python . " test_channel_pipe.py", {'err_io': 'out'})
@@ -2188,18 +2181,21 @@ func Test_issue_5150()
   else
     let cmd = 'grep foo'
   endif
+
   let g:job = job_start(cmd, {})
+  sleep 50m  " give the job time to start
   call job_stop(g:job)
-  sleep 50m
-  call assert_equal(-1, job_info(g:job).exitval)
+  call WaitForAssert({-> assert_equal(-1, job_info(g:job).exitval)})
+
   let g:job = job_start(cmd, {})
+  sleep 50m
   call job_stop(g:job, 'term')
-  sleep 50m
-  call assert_equal(-1, job_info(g:job).exitval)
+  call WaitForAssert({-> assert_equal(-1, job_info(g:job).exitval)})
+
   let g:job = job_start(cmd, {})
-  call job_stop(g:job, 'kill')
   sleep 50m
-  call assert_equal(-1, job_info(g:job).exitval)
+  call job_stop(g:job, 'kill')
+  call WaitForAssert({-> assert_equal(-1, job_info(g:job).exitval)})
 endfunc
 
 func Test_issue_5485()
@@ -2214,6 +2210,7 @@ endfunc
 func Test_job_trailing_space_unix()
   CheckUnix
   CheckExecutable cat
+
   let job = job_start("cat ", #{in_io: 'null'})
   call WaitForAssert({-> assert_equal("dead", job_status(job))})
   call assert_equal(0, job_info(job).exitval)
@@ -2307,8 +2304,14 @@ endfunc
 func Test_cb_with_input()
   let g:wait_exit_cb = 1
 
-  call job_start('echo "Vim''s test"',
-        \ {'out_cb': 'ExitCb_cb_with_input'})
+  if has('win32')
+    let cmd = 'cmd /c echo "Vim''s test"'
+  else
+    let cmd = 'echo "Vim''s test"'
+  endif
+
+  let job = job_start(cmd, {'out_cb': 'ExitCb_cb_with_input'})
+  call WaitFor({-> job_status(job) == "dead"})
   call WaitForAssert({-> assert_equal(0, g:wait_exit_cb)})
 
   unlet g:wait_exit_cb

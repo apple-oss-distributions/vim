@@ -60,6 +60,17 @@
 #define P_RWINONLY   0x10000000L // only redraw current window
 #define P_MLE	     0x20000000L // under control of 'modelineexpr'
 
+// Returned by get_option_value().
+typedef enum {
+    gov_unknown,
+    gov_bool,
+    gov_number,
+    gov_string,
+    gov_hidden_bool,
+    gov_hidden_number,
+    gov_hidden_string
+} getoption_T;
+
 /*
  * Default values for 'errorformat'.
  * The "%f|%l| %m" one is used for when the contents of the quickfix window is
@@ -141,12 +152,13 @@
 #define FO_ONE_LETTER	'1'
 #define FO_WHITE_PAR	'w'	// trailing white space continues paragr.
 #define FO_AUTO		'a'	// automatic formatting
+#define FO_RIGOROUS_TW	']'     // respect textwidth rigorously
 #define FO_REMOVE_COMS	'j'	// remove comment leaders when joining lines
 #define FO_PERIOD_ABBR	'p'	// don't break a single space after a period
 
 #define DFLT_FO_VI	"vt"
 #define DFLT_FO_VIM	"tcq"
-#define FO_ALL		"tcroq2vlb1mMBn,awjp"	// for do_set()
+#define FO_ALL		"tcroq2vlb1mMBn,aw]jp"	// for do_set()
 
 // characters for the p_cpo option:
 #define CPO_ALTREAD	'a'	// ":read" sets alternate file name
@@ -702,9 +714,6 @@ EXTERN int	p_lpl;		// 'loadplugins'
 #if defined(DYNAMIC_LUA)
 EXTERN char_u	*p_luadll;	// 'luadll'
 #endif
-#ifdef FEAT_GUI_MAC
-EXTERN int	p_macatsui;	// 'macatsui'
-#endif
 EXTERN int	p_magic;	// 'magic'
 EXTERN char_u	*p_menc;	// 'makeencoding'
 #ifdef FEAT_QUICKFIX
@@ -822,6 +831,7 @@ EXTERN int	p_ru;		// 'ruler'
 EXTERN char_u	*p_ruf;		// 'rulerformat'
 #endif
 EXTERN char_u	*p_pp;		// 'packpath'
+EXTERN char_u	*p_qftf;	// 'quickfixtextfunc'
 EXTERN char_u	*p_rtp;		// 'runtimepath'
 EXTERN long	p_sj;		// 'scrolljump'
 #if defined(MSWIN) && defined(FEAT_GUI)
@@ -913,6 +923,7 @@ EXTERN char_u	*p_tfu;		// 'tagfunc'
 EXTERN char_u	*p_spc;		// 'spellcapcheck'
 EXTERN char_u	*p_spf;		// 'spellfile'
 EXTERN char_u	*p_spl;		// 'spelllang'
+EXTERN char_u	*p_spo;		// 'spelloptions'
 EXTERN char_u	*p_sps;		// 'spellsuggest'
 #endif
 EXTERN int	p_spr;		// 'splitright'
@@ -1185,6 +1196,7 @@ enum
     , BV_SPC
     , BV_SPF
     , BV_SPL
+    , BV_SPO
 #endif
     , BV_STS
 #ifdef FEAT_SEARCHPATH
@@ -1221,6 +1233,7 @@ enum
 enum
 {
     WV_LIST = 0
+    , WV_LCS
 #ifdef FEAT_ARABIC
     , WV_ARAB
 #endif

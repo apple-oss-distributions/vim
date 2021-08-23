@@ -34,9 +34,6 @@
 static int file_owned(char *fname);
 #endif
 static void mainerr(int, char_u *);
-# if defined(HAVE_LOCALE_H) || defined(X_LOCALE)
-static void init_locale(void);
-# endif
 static void early_arg_scan(mparm_T *parmp);
 #ifndef NO_VIM_MAIN
 static void usage(void);
@@ -319,33 +316,6 @@ main
 	params.want_full_screen = FALSE;
 #endif
 
-#if defined(FEAT_GUI_MAC) && defined(MACOS_X_DARWIN)
-    // When the GUI is started from Finder, need to display messages in a
-    // message box.  isatty(2) returns TRUE anyway, thus we need to check the
-    // name to know we're not started from a terminal.
-    if (gui.starting && (!isatty(2) || strcmp("/dev/console", ttyname(2)) == 0))
-    {
-	params.want_full_screen = FALSE;
-
-	// Avoid always using "/" as the current directory.  Note that when
-	// started from Finder the arglist will be filled later in
-	// HandleODocAE() and "fname" will be NULL.
-	if (getcwd((char *)NameBuff, MAXPATHL) != NULL
-						&& STRCMP(NameBuff, "/") == 0)
-	{
-	    if (params.fname != NULL)
-		(void)vim_chdirfile(params.fname, "drop");
-	    else
-	    {
-		expand_env((char_u *)"$HOME", NameBuff, MAXPATHL);
-		vim_chdir(NameBuff);
-	    }
-	    if (start_dir != NULL)
-		mch_dirname(start_dir, MAXPATHL);
-	}
-    }
-#endif
-
     /*
      * mch_init() sets up the terminal (window) for use.  This must be
      * done after resetting full_screen, otherwise it may move the cursor.
@@ -425,6 +395,10 @@ main
     init_highlight(TRUE, FALSE); // set the default highlight groups
     TIME_MSG("init highlight");
 
+#if defined(FEAT_TERMRESPONSE)
+    init_term_props(TRUE);
+#endif
+
 #ifdef FEAT_EVAL
     // Set the break level after the terminal is initialized.
     debug_break_level = params.use_debug_break_level;
@@ -476,6 +450,13 @@ vim_main2(void)
     if (p_lpl)
     {
 	char_u *rtp_copy = NULL;
+	char_u *plugin_pattern = (char_u *)
+# if defined(VMS) || defined(AMIGA) // VMS and Amiga don't handle the "**".
+		"plugin/*.vim"
+# else
+		"plugin/**/*.vim"
+# endif
+		;
 
 	// First add all package directories to 'runtimepath', so that their
 	// autoload directories can be found.  Only if not done already with a
@@ -488,12 +469,7 @@ vim_main2(void)
 	    add_pack_start_dirs();
 	}
 
-	source_in_path(rtp_copy == NULL ? p_rtp : rtp_copy,
-# ifdef VMS	// Somehow VMS doesn't handle the "**".
-		(char_u *)"plugin/*.vim",
-# else
-		(char_u *)"plugin/**/*.vim",
-# endif
+	source_in_path(rtp_copy == NULL ? p_rtp : rtp_copy, plugin_pattern,
 		DIP_ALL | DIP_NOAFTER, NULL);
 	TIME_MSG("loading plugins");
 	vim_free(rtp_copy);
@@ -504,13 +480,8 @@ vim_main2(void)
 	    load_start_packages();
 	TIME_MSG("loading packages");
 
-# ifdef VMS	// Somehow VMS doesn't handle the "**".
-	source_runtime((char_u *)"plugin/*.vim", DIP_ALL | DIP_AFTER);
-# else
-	source_runtime((char_u *)"plugin/**/*.vim", DIP_ALL | DIP_AFTER);
-# endif
+	source_runtime(plugin_pattern, DIP_ALL | DIP_AFTER);
 	TIME_MSG("loading after plugins");
-
     }
 #endif
 
@@ -811,7 +782,7 @@ vim_main2(void)
 
 #if defined(FEAT_TERMRESPONSE)
     // Must be done before redrawing, puts a few characters on the screen.
-    may_req_ambiguous_char_width();
+    check_terminal_behavior();
 #endif
 
     RedrawingDisabled = 0;
@@ -844,12 +815,7 @@ vim_main2(void)
     // done after the clipboard is available and all initial commands that may
     // modify the 'clipboard' setting have run; i.e. just before entering the
     // main loop.
-    {
-	int default_regname = 0;
-
-	adjust_clip_reg(&default_regname);
-	set_reg_var(default_regname);
-    }
+    reset_reg_var();
 #endif
 
 #if defined(FEAT_DIFF)
@@ -1045,6 +1011,19 @@ common_init(mparm_T *paramp)
 is_not_a_term()
 {
     return params.not_a_term;
+}
+
+/*
+ * Return TRUE when the --not-a-term argument was found or the GUI is in use.
+ */
+    static int
+is_not_a_term_or_gui()
+{
+    return params.not_a_term
+#ifdef FEAT_GUI
+			    || gui.in_use
+#endif
+	;
 }
 
 
@@ -1557,7 +1536,8 @@ getout_preserve_modified(int exitval)
 
 
 /*
- * Exit properly.
+ * Exit properly.  This is the only way to exit Vim after startup has
+ * succeeded.  We are certain to exit here, no way to abort it.
  */
     void
 getout(int exitval)
@@ -1573,10 +1553,13 @@ getout(int exitval)
     if (exmode_active || Unix2003_compat )
 	exitval += ex_exitval;
 
-    // Position the cursor on the last screen line, below all the text
-#ifdef FEAT_GUI
-    if (!gui.in_use)
+#ifdef FEAT_EVAL
+    set_vim_var_type(VV_EXITING, VAR_NUMBER);
+    set_vim_var_nr(VV_EXITING, exitval);
 #endif
+
+    // Position the cursor on the last screen line, below all the text
+    if (!is_not_a_term_or_gui())
 	windgoto((int)Rows - 1, 0);
 
 #if defined(FEAT_EVAL) || defined(FEAT_SYN_HL)
@@ -1686,9 +1669,7 @@ getout(int exitval)
     }
 
     // Position the cursor again, the autocommands may have moved it
-#ifdef FEAT_GUI
-    if (!gui.in_use)
-#endif
+    if (!is_not_a_term_or_gui())
 	windgoto((int)Rows - 1, 0);
 
 #ifdef FEAT_JOB_CHANNEL
@@ -1734,56 +1715,6 @@ getout(int exitval)
 
     mch_exit(exitval);
 }
-
-#if defined(HAVE_LOCALE_H) || defined(X_LOCALE)
-/*
- * Setup to use the current locale (for ctype() and many other things).
- */
-    static void
-init_locale(void)
-{
-    setlocale(LC_ALL, "");
-
-# ifdef FEAT_GUI_GTK
-    // Tell Gtk not to change our locale settings.
-    gtk_disable_setlocale();
-# endif
-# if defined(FEAT_FLOAT) && defined(LC_NUMERIC)
-    // Make sure strtod() uses a decimal point, not a comma.
-    setlocale(LC_NUMERIC, "C");
-# endif
-
-# ifdef MSWIN
-    // Apparently MS-Windows printf() may cause a crash when we give it 8-bit
-    // text while it's expecting text in the current locale.  This call avoids
-    // that.
-    setlocale(LC_CTYPE, "C");
-# endif
-
-# ifdef FEAT_GETTEXT
-    {
-	int	mustfree = FALSE;
-	char_u	*p;
-
-#  ifdef DYNAMIC_GETTEXT
-	// Initialize the gettext library
-	dyn_libintl_init();
-#  endif
-	// expand_env() doesn't work yet, because g_chartab[] is not
-	// initialized yet, call vim_getenv() directly
-	p = vim_getenv((char_u *)"VIMRUNTIME", &mustfree);
-	if (p != NULL && *p != NUL)
-	{
-	    vim_snprintf((char *)NameBuff, MAXPATHL, "%s/lang", p);
-	    bindtextdomain(VIMPACKAGE, (char *)NameBuff);
-	}
-	if (mustfree)
-	    vim_free(p);
-	textdomain(VIMPACKAGE);
-    }
-# endif
-}
-#endif
 
 /*
  * Get the name of the display, before gui_prepare() removes it from
@@ -1914,18 +1845,6 @@ parse_command_name(mparm_T *parmp)
     char_u	*initstr;
 
     initstr = gettail((char_u *)parmp->argv[0]);
-
-#ifdef FEAT_GUI_MAC
-    // An issue has been seen when launching Vim in such a way that
-    // $PWD/$ARGV[0] or $ARGV[0] is not the absolute path to the
-    // executable or a symbolic link of it. Until this issue is resolved
-    // we prohibit the GUI from being used.
-    if (STRCMP(initstr, parmp->argv[0]) == 0)
-	disallow_gui = TRUE;
-
-    // TODO: On MacOS X default to gui if argv[0] ends in:
-    //       /Vim.app/Contents/MacOS/Vim
-#endif
 
 #ifdef FEAT_EVAL
     set_vim_var_string(VV_PROGNAME, initstr, -1);
@@ -2087,6 +2006,9 @@ command_line_scan(mparm_T *parmp)
 		{
 		    Columns = 80;	// need to init Columns
 		    info_message = TRUE; // use mch_msg(), not mch_errmsg()
+#if defined(FEAT_GUI) && !defined(ALWAYS_USE_GUI)
+		    gui.starting = FALSE; // not starting GUI, will exit
+#endif
 		    list_version();
 		    msg_putchar('\n');
 		    msg_didout = FALSE;
@@ -2817,18 +2739,20 @@ read_stdin(void)
     no_wait_return = TRUE;
     i = msg_didany;
     set_buflisted(TRUE);
-    (void)open_buffer(TRUE, NULL, 0);	// create memfile and read file
+
+    // Create memfile and read from stdin.
+    (void)open_buffer(TRUE, NULL, 0);
+
     no_wait_return = FALSE;
     msg_didany = i;
     TIME_MSG("reading stdin");
 
     check_swap_exists_action();
+
 #if !(defined(AMIGA) || defined(MACOS_X))
-    /*
-     * Close stdin and dup it from stderr.  Required for GPM to work
-     * properly, and for running external commands.
-     * Is there any other system that cannot do this?
-     */
+    // Dup stdin from stderr to read commands from, so that shell commands
+    // work.
+    // TODO: why is this needed, even though readfile() has done this?
     close(0);
     vim_ignored = dup(2);
 #endif
@@ -3377,9 +3301,8 @@ process_env(
     int		is_viminit) // when TRUE, called for VIMINIT
 {
     char_u	*initstr;
-#ifdef FEAT_EVAL
     sctx_T	save_current_sctx;
-#endif
+
     ESTACK_CHECK_DECLARATION
 
     if ((initstr = mch_getenv(env)) != NULL && *initstr != NUL)
@@ -3388,20 +3311,19 @@ process_env(
 	    vimrc_found(NULL, NULL);
 	estack_push(ETYPE_ENV, env, 0);
 	ESTACK_CHECK_SETUP
-#ifdef FEAT_EVAL
 	save_current_sctx = current_sctx;
+	current_sctx.sc_version = 1;
+#ifdef FEAT_EVAL
 	current_sctx.sc_sid = SID_ENV;
 	current_sctx.sc_seq = 0;
 	current_sctx.sc_lnum = 0;
-	current_sctx.sc_version = 1;
 #endif
+
 	do_cmdline_cmd(initstr);
 
 	ESTACK_CHECK_NOW
 	estack_pop();
-#ifdef FEAT_EVAL
 	current_sctx = save_current_sctx;
-#endif
 	return OK;
     }
     return FAIL;
@@ -3649,8 +3571,11 @@ usage(void)
 #endif // FEAT_GUI_X11
 #ifdef FEAT_GUI_GTK
     mch_msg(_("\nArguments recognised by gvim (GTK+ version):\n"));
+    main_msg(_("-background <color>\tUse <color> for the background (also: -bg)"));
+    main_msg(_("-foreground <color>\tUse <color> for normal text (also: -fg)"));
     main_msg(_("-font <font>\t\tUse <font> for normal text (also: -fn)"));
     main_msg(_("-geometry <geom>\tUse <geom> for initial geometry (also: -geom)"));
+    main_msg(_("-iconic\t\tStart Vim iconified"));
     main_msg(_("-reverse\t\tUse reverse video (also: -rv)"));
     main_msg(_("-display <display>\tRun Vim on <display> (also: --display)"));
     main_msg(_("--role <role>\tSet a unique role to identify the main window"));

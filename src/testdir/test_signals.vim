@@ -80,20 +80,18 @@ endfunc
 
 " Test signal INT. Handler sets got_int. It should be like typing CTRL-C.
 func Test_signal_INT()
+  CheckRunVimInTerminal
   if !HasSignal('INT')
     throw 'Skipped: INT signal not supported'
   endif
 
-  " Skip the rest of the test when running with valgrind as signal INT is not
-  " received somehow by Vim when running with valgrind.
+  " Skip the test when running with valgrind as signal INT is not received
+  " somehow by Vim when running with valgrind.
   let cmd = GetVimCommand()
   if cmd =~ 'valgrind'
     throw 'Skipped: cannot test signal INT with valgrind'
   endif
 
-  if !CanRunVimInTerminal()
-    throw 'Skipped: cannot run vim in terminal'
-  endif
   let buf = RunVimInTerminal('', {'rows': 6})
   let pid_vim = term_getjob(buf)->job_info().process
 
@@ -120,16 +118,16 @@ func Test_deadly_signal_TERM()
   if !HasSignal('TERM')
     throw 'Skipped: TERM signal not supported'
   endif
-  if !CanRunVimInTerminal()
-    throw 'Skipped: cannot run vim in terminal'
-  endif
-  let cmd = GetVimCommand()
-  if cmd =~ 'valgrind'
-    throw 'Skipped: cannot test signal TERM with valgrind'
-  endif
+  CheckRunVimInTerminal
+
+  " If test fails once, it can leave temporary files and trying to rerun
+  " the test would then fail again if they are not deleted first.
+  call delete('.Xsig_TERM.swp')
+  call delete('XsetupAucmd')
+  call delete('XautoOut')
   let lines =<< trim END
-    au VimLeave * call writefile(["VimLeave triggered"], "XautoOut", "a")
-    au VimLeavePre * call writefile(["VimLeavePre triggered"], "XautoOut", "a")
+    au VimLeave * call writefile(["VimLeave triggered"], "XautoOut", "as")
+    au VimLeavePre * call writefile(["VimLeavePre triggered"], "XautoOut", "as")
   END
   call writefile(lines, 'XsetupAucmd')
 
@@ -151,8 +149,7 @@ func Test_deadly_signal_TERM()
   call assert_equal(['foo'], getline(1, '$'))
 
   let result = readfile('XautoOut')
-  call assert_match('VimLeavePre triggered', result[0])
-  call assert_match('VimLeave triggered', result[1])
+  call assert_equal(["VimLeavePre triggered", "VimLeave triggered"], result)
 
   %bwipe!
   call delete('.Xsig_TERM.swp')

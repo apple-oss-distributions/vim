@@ -3,6 +3,7 @@
 source check.vim
 source screendump.vim
 source view_util.vim
+source shared.vim
 
 func Test_complete_tab()
   call writefile(['testfile'], 'Xtestfile')
@@ -57,6 +58,22 @@ func Test_complete_wildmenu()
   call feedkeys(":e Xdir1/\<Tab>\<Down>\<Up>\<Right>\<CR>", 'tx')
   call assert_equal('testfile1', getline(1))
 
+  " this fails in some Unix GUIs, not sure why
+  if !has('unix') || !has('gui_running')
+    " <C-J>/<C-K> mappings to go up/down directories when 'wildcharm' is
+    " different than 'wildchar'.
+    set wildcharm=<C-Z>
+    cnoremap <C-J> <Down><C-Z>
+    cnoremap <C-K> <Up><C-Z>
+    call feedkeys(":e Xdir1/\<Tab>\<C-J>\<CR>", 'tx')
+    call assert_equal('testfile3', getline(1))
+    call feedkeys(":e Xdir1/\<Tab>\<C-J>\<C-K>\<CR>", 'tx')
+    call assert_equal('testfile1', getline(1))
+    set wildcharm=0
+    cunmap <C-J>
+    cunmap <C-K>
+  endif
+
   " Test for canceling the wild menu by adding a character
   redrawstatus
   call feedkeys(":e Xdir1/\<Tab>x\<C-B>\"\<CR>", 'xt')
@@ -84,10 +101,34 @@ func Test_complete_wildmenu()
   set nowildmenu
 endfunc
 
+func Test_wildmenu_screendump()
+  CheckScreendump
+
+  let lines =<< trim [SCRIPT]
+    set wildmenu hlsearch
+  [SCRIPT]
+  call writefile(lines, 'XTest_wildmenu')
+
+  let buf = RunVimInTerminal('-S XTest_wildmenu', {'rows': 8})
+  call term_sendkeys(buf, ":vim\<Tab>")
+  call VerifyScreenDump(buf, 'Test_wildmenu_1', {})
+
+  call term_sendkeys(buf, "\<Tab>")
+  call VerifyScreenDump(buf, 'Test_wildmenu_2', {})
+
+  call term_sendkeys(buf, "\<Tab>")
+  call VerifyScreenDump(buf, 'Test_wildmenu_3', {})
+
+  call term_sendkeys(buf, "\<Tab>\<Tab>")
+  call VerifyScreenDump(buf, 'Test_wildmenu_4', {})
+  call term_sendkeys(buf, "\<Esc>")
+
+  " clean up
+  call StopVimInTerminal(buf)
+  call delete('XTest_wildmenu')
+endfunc
+
 func Test_map_completion()
-  if !has('cmdline_compl')
-    return
-  endif
   call feedkeys(":map <unique> <si\<Tab>\<Home>\"\<CR>", 'xt')
   call assert_equal('"map <unique> <silent>', getreg(':'))
   call feedkeys(":map <script> <un\<Tab>\<Home>\"\<CR>", 'xt')
@@ -158,14 +199,13 @@ func Test_map_completion()
   unmap <Left>
   set cpo-=k
 
+  call assert_fails('call feedkeys(":map \\\\%(\<Tab>\<Home>\"\<CR>", "xt")', 'E53:')
+
   unmap <Middle>x
   set cpo&vim
 endfunc
 
 func Test_match_completion()
-  if !has('cmdline_compl')
-    return
-  endif
   hi Aardig ctermfg=green
   call feedkeys(":match \<Tab>\<Home>\"\<CR>", 'xt')
   call assert_equal('"match Aardig', getreg(':'))
@@ -174,9 +214,6 @@ func Test_match_completion()
 endfunc
 
 func Test_highlight_completion()
-  if !has('cmdline_compl')
-    return
-  endif
   hi Aardig ctermfg=green
   call feedkeys(":hi \<Tab>\<Home>\"\<CR>", 'xt')
   call assert_equal('"hi Aardig', getreg(':'))
@@ -190,6 +227,10 @@ func Test_highlight_completion()
   call assert_equal('"hi default', getreg(':'))
   call feedkeys(":hi c\<S-Tab>\<Home>\"\<CR>", 'xt')
   call assert_equal('"hi clear', getreg(':'))
+  call feedkeys(":hi clear Aardig Aard\<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"hi clear Aardig Aardig', getreg(':'))
+  call feedkeys(":hi Aardig \<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal("\"hi Aardig \t", getreg(':'))
 
   " A cleared group does not show up in completions.
   hi Anders ctermfg=green
@@ -200,10 +241,15 @@ func Test_highlight_completion()
   call assert_equal([], getcompletion('A', 'highlight'))
 endfunc
 
+" Test for command-line expansion of "hi Ni " (easter egg)
+func Test_highlight_easter_egg()
+  call test_override('ui_delay', 1)
+  call feedkeys(":hi Ni \<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal("\"hi Ni \<Tab>", @:)
+  call test_override('ALL', 0)
+endfunc
+
 func Test_getcompletion()
-  if !has('cmdline_compl')
-    return
-  endif
   let groupcount = len(getcompletion('', 'event'))
   call assert_true(groupcount > 0)
   let matchcount = len('File'->getcompletion('event'))
@@ -354,6 +400,20 @@ func Test_getcompletion()
     call assert_equal(['Testing'], l)
   endif
 
+  " Command line completion tests
+  let l = getcompletion('cd ', 'cmdline')
+  call assert_true(index(l, 'samples/') >= 0)
+  let l = getcompletion('cd NoMatch', 'cmdline')
+  call assert_equal([], l)
+  let l = getcompletion('let v:n', 'cmdline')
+  call assert_true(index(l, 'v:null') >= 0)
+  let l = getcompletion('let v:notexists', 'cmdline')
+  call assert_equal([], l)
+  let l = getcompletion('call tag', 'cmdline')
+  call assert_true(index(l, 'taglist(') >= 0)
+  let l = getcompletion('call paint', 'cmdline')
+  call assert_equal([], l)
+
   " For others test if the name is recognized.
   let names = ['buffer', 'environment', 'file_in_path', 'mapping', 'tag', 'tag_listfiles', 'user']
   if has('cmdline_hist')
@@ -377,8 +437,46 @@ func Test_getcompletion()
   call delete('Xtags')
   set tags&
 
+  call assert_fails("call getcompletion('\\\\@!\\\\@=', 'buffer')", 'E871:')
   call assert_fails('call getcompletion("", "burp")', 'E475:')
-  call assert_fails('call getcompletion("abc", [])', 'E474:')
+  call assert_fails('call getcompletion("abc", [])', 'E475:')
+endfunc
+
+func Test_fullcommand()
+  let tests = {
+        \ '':           '',
+        \ ':':          '',
+        \ ':::':        '',
+        \ ':::5':       '',
+        \ 'not_a_cmd':  '',
+        \ 'Check':      '',
+        \ 'syntax':     'syntax',
+        \ ':syntax':    'syntax',
+        \ '::::syntax': 'syntax',
+        \ 'sy':         'syntax',
+        \ 'syn':        'syntax',
+        \ 'synt':       'syntax',
+        \ ':sy':        'syntax',
+        \ '::::sy':     'syntax',
+        \ 'match':      'match',
+        \ '2match':     'match',
+        \ '3match':     'match',
+        \ 'aboveleft':  'aboveleft',
+        \ 'abo':        'aboveleft',
+        \ 's':          'substitute',
+        \ '5s':         'substitute',
+        \ ':5s':        'substitute',
+        \ "'<,'>s":     'substitute',
+        \ ":'<,'>s":    'substitute',
+        \ 'CheckUni':   'CheckUnix',
+        \ 'CheckUnix':  'CheckUnix',
+  \ }
+
+  for [in, want] in items(tests)
+    call assert_equal(want, fullcommand(in))
+  endfor
+
+  call assert_equal('syntax', 'syn'->fullcommand())
 endfunc
 
 func Test_shellcmd_completion()
@@ -499,9 +597,7 @@ func Test_cmdline_remove_char()
 endfunc
 
 func Test_cmdline_keymap_ctrl_hat()
-  if !has('keymap')
-    return
-  endif
+  CheckFeature keymap
 
   set keymap=esperanto
   call feedkeys(":\"Jxauxdo \<C-^>Jxauxdo \<C-^>Jxauxdo\<CR>", 'tx')
@@ -556,6 +652,10 @@ func Test_cmdline_complete_user_func()
   call assert_match('"func Test_cmdline_complete_user', @:)
   call feedkeys(":func s:ScriptL\<Tab>\<Home>\"\<cr>", 'tx')
   call assert_match('"func <SNR>\d\+_ScriptLocalFunction', @:)
+
+  " g: prefix also works
+  call feedkeys(":echo g:Test_cmdline_complete_user_f\<Tab>\<Home>\"\<cr>", 'tx')
+  call assert_match('"echo g:Test_cmdline_complete_user_func', @:)
 endfunc
 
 func Test_cmdline_complete_user_names()
@@ -568,8 +668,7 @@ func Test_cmdline_complete_user_names()
       call feedkeys(':e ~' . first_letter . "\<c-a>\<c-B>\"\<cr>", 'tx')
       call assert_match('^"e \~.*\<' . whoami . '\>', @:)
     endif
-  endif
-  if has('win32')
+  elseif has('win32')
     " Just in case: check that the system has an Administrator account.
     let names = system('net user')
     if names =~ 'Administrator'
@@ -578,36 +677,46 @@ func Test_cmdline_complete_user_names()
       call feedkeys(':e ~A' . "\<c-a>\<c-B>\"\<cr>", 'tx')
       call assert_match('^"e \~.*Administrator', @:)
     endif
+  else
+    throw 'Skipped: does not work on this platform'
   endif
 endfunc
 
 func Test_cmdline_complete_bang()
-  if executable('whoami')
-    call feedkeys(":!whoam\<C-A>\<C-B>\"\<CR>", 'tx')
-    call assert_match('^".*\<whoami\>', @:)
-  endif
+  CheckExecutable whoami
+  call feedkeys(":!whoam\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_match('^".*\<whoami\>', @:)
 endfunc
 
 func Test_cmdline_complete_languages()
+  let lang = substitute(execute('language time'), '.*"\(.*\)"$', '\1', '')
+  call assert_equal(lang, v:lc_time)
+
+  let lang = substitute(execute('language ctype'), '.*"\(.*\)"$', '\1', '')
+  call assert_equal(lang, v:ctype)
+
+  let lang = substitute(execute('language collate'), '.*"\(.*\)"$', '\1', '')
+  call assert_equal(lang, v:collate)
+
   let lang = substitute(execute('language messages'), '.*"\(.*\)"$', '\1', '')
+  call assert_equal(lang, v:lang)
 
   call feedkeys(":language \<c-a>\<c-b>\"\<cr>", 'tx')
-  call assert_match('^"language .*\<ctype\>.*\<messages\>.*\<time\>', @:)
+  call assert_match('^"language .*\<collate\>.*\<ctype\>.*\<messages\>.*\<time\>', @:)
 
-  if has('unix')
-    " TODO: these tests don't work on Windows. lang appears to be 'C'
-    " but C does not appear in the completion. Why?
-    call assert_match('^"language .*\<' . lang . '\>', @:)
+  call assert_match('^"language .*\<' . lang . '\>', @:)
 
-    call feedkeys(":language messages \<c-a>\<c-b>\"\<cr>", 'tx')
-    call assert_match('^"language .*\<' . lang . '\>', @:)
+  call feedkeys(":language messages \<c-a>\<c-b>\"\<cr>", 'tx')
+  call assert_match('^"language .*\<' . lang . '\>', @:)
 
-    call feedkeys(":language ctype \<c-a>\<c-b>\"\<cr>", 'tx')
-    call assert_match('^"language .*\<' . lang . '\>', @:)
+  call feedkeys(":language ctype \<c-a>\<c-b>\"\<cr>", 'tx')
+  call assert_match('^"language .*\<' . lang . '\>', @:)
 
-    call feedkeys(":language time \<c-a>\<c-b>\"\<cr>", 'tx')
-    call assert_match('^"language .*\<' . lang . '\>', @:)
-  endif
+  call feedkeys(":language time \<c-a>\<c-b>\"\<cr>", 'tx')
+  call assert_match('^"language .*\<' . lang . '\>', @:)
+
+  call feedkeys(":language collate \<c-a>\<c-b>\"\<cr>", 'tx')
+  call assert_match('^"language .*\<' . lang . '\>', @:)
 endfunc
 
 func Test_cmdline_complete_env_variable()
@@ -615,6 +724,17 @@ func Test_cmdline_complete_env_variable()
   call feedkeys(":edit $X_VIM_TEST_COMPLETE_E\<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_match('"edit $X_VIM_TEST_COMPLETE_ENV', @:)
   unlet $X_VIM_TEST_COMPLETE_ENV
+endfunc
+
+func Test_cmdline_complete_expression()
+  let g:SomeVar = 'blah'
+  for cmd in ['exe', 'echo', 'echon', 'echomsg']
+    call feedkeys(":" .. cmd .. " SomeV\<Tab>\<C-B>\"\<CR>", 'tx')
+    call assert_match('"' .. cmd .. ' SomeVar', @:)
+    call feedkeys(":" .. cmd .. " foo SomeV\<Tab>\<C-B>\"\<CR>", 'tx')
+    call assert_match('"' .. cmd .. ' foo SomeVar', @:)
+  endfor
+  unlet g:SomeVar
 endfunc
 
 " Test for various command-line completion
@@ -699,6 +819,10 @@ func Test_cmdline_complete_various()
   call feedkeys(":doautocmd User MyCmd a.c\<C-A>\<C-B>\"\<CR>", 'xt')
   call assert_equal("\"doautocmd User MyCmd a.c\<C-A>", @:)
 
+  " completion of autocmd group after comma
+  call feedkeys(":doautocmd BufNew,BufEn\<C-A>\<C-B>\"\<CR>", 'xt')
+  call assert_equal("\"doautocmd BufNew,BufEnter", @:)
+
   " completion for the :augroup command
   augroup XTest
   augroup END
@@ -747,6 +871,10 @@ func Test_cmdline_complete_various()
   call feedkeys(":py3\<C-A>\<C-B>\"\<CR>", 'xt')
   call assert_equal('"py3 py3do py3file', @:)
 
+  " completion for the :vim9 commands
+  call feedkeys(":vim9\<C-A>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"vim9cmd vim9script', @:)
+
   " redir @" is not the start of a comment. So complete after that
   call feedkeys(":redir @\" | cwin\t\<C-B>\"\<CR>", 'xt')
   call assert_equal('"redir @" | cwindow', @:)
@@ -774,6 +902,15 @@ func Test_cmdline_complete_various()
   " completion after a range followed by a pipe (|) character
   call feedkeys(":1,10 | chist\t\<C-B>\"\<CR>", 'xt')
   call assert_equal('"1,10 | chistory', @:)
+
+  " use <Esc> as the 'wildchar' for completion
+  set wildchar=<Esc>
+  call feedkeys(":g/a\\xb/clearj\<Esc>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"g/a\xb/clearjumps', @:)
+  " pressing <esc> twice should cancel the command
+  call feedkeys(":chist\<Esc>\<Esc>", 'xt')
+  call assert_equal('"g/a\xb/clearjumps', @:)
+  set wildchar&
 endfunc
 
 func Test_cmdline_write_alternatefile()
@@ -788,7 +925,7 @@ func Test_cmdline_write_alternatefile()
   f %<
   call assert_equal('foo-B', expand('%'))
   new
-  call assert_fails('f #<', 'E95')
+  call assert_fails('f #<', 'E95:')
   bw!
   f foo-B.txt
   f %<-A
@@ -818,7 +955,7 @@ func Test_cmdline_search_range()
   call assert_equal('B', getline(2))
 
   let @/ = 'apple'
-  call assert_fails('\/print', 'E486:')
+  call assert_fails('\/print', ['E486:.*apple'])
 
   bwipe!
 endfunc
@@ -880,6 +1017,8 @@ func Test_getcmdtype()
 endfunc
 
 func Test_getcmdwintype()
+  CheckFeature cmdwin
+
   call feedkeys("q/:let a = getcmdwintype()\<CR>:q\<CR>", 'x!')
   call assert_equal('/', a)
 
@@ -896,6 +1035,8 @@ func Test_getcmdwintype()
 endfunc
 
 func Test_getcmdwin_autocmd()
+  CheckFeature cmdwin
+
   let s:seq = []
   augroup CmdWin
   au WinEnter * call add(s:seq, 'WinEnter ' .. win_getid())
@@ -935,7 +1076,7 @@ func Test_verbosefile()
   call assert_match("foo\nbar", join(log, "\n"))
   call delete('Xlog')
   call mkdir('Xdir')
-  call assert_fails('set verbosefile=Xdir', 'E474:')
+  call assert_fails('set verbosefile=Xdir', ['E484:.*Xdir', 'E474:'])
   call delete('Xdir', 'd')
 endfunc
 
@@ -1008,6 +1149,8 @@ func Test_cmdline_overstrike()
 endfunc
 
 func Test_cmdwin_bug()
+  CheckFeature cmdwin
+
   let winid = win_getid()
   sp
   try
@@ -1018,6 +1161,7 @@ func Test_cmdwin_bug()
 endfunc
 
 func Test_cmdwin_restore()
+  CheckFeature cmdwin
   CheckScreendump
 
   let lines =<< trim [SCRIPT]
@@ -1093,6 +1237,8 @@ func Test_buffers_lastused()
 endfunc
 
 func Test_cmdwin_feedkeys()
+  CheckFeature cmdwin
+
   " This should not generate E488
   call feedkeys("q:\<CR>", 'x')
   " Using feedkeys with q: only should automatically close the cmd window
@@ -1104,6 +1250,8 @@ endfunc
 " Tests for the issues fixed in 7.4.441.
 " When 'cedit' is set to Ctrl-C, opening the command window hangs Vim
 func Test_cmdwin_cedit()
+  CheckFeature cmdwin
+
   exe "set cedit=\<C-c>"
   normal! :
   call assert_equal(1, winnr('$'))
@@ -1126,8 +1274,11 @@ endfunc
 
 " Test for CmdwinEnter autocmd
 func Test_cmdwin_autocmd()
+  CheckFeature cmdwin
+
   augroup CmdWin
     au!
+    autocmd BufLeave * if &buftype == '' | update | endif
     autocmd CmdwinEnter * startinsert
   augroup END
 
@@ -1168,10 +1319,12 @@ func Test_cmdline_expand_special()
 endfunc
 
 func Test_cmdwin_jump_to_win()
+  CheckFeature cmdwin
+
   call assert_fails('call feedkeys("q:\<C-W>\<C-W>\<CR>", "xt")', 'E11:')
   new
   set modified
-  call assert_fails('call feedkeys("q/:qall\<CR>", "xt")', 'E162:')
+  call assert_fails('call feedkeys("q/:qall\<CR>", "xt")', ['E37:', 'E162:'])
   close!
   call feedkeys("q/:close\<CR>", "xt")
   call assert_equal(1, winnr('$'))
@@ -1181,6 +1334,33 @@ func Test_cmdwin_jump_to_win()
   " opening command window twice should fail
   call assert_beeps('call feedkeys("q:q:\<CR>\<CR>", "xt")')
   call assert_equal(1, winnr('$'))
+endfunc
+
+func Test_cmdwin_interrupted()
+  CheckFeature cmdwin
+  CheckScreendump
+
+  " aborting the :smile output caused the cmdline window to use the current
+  " buffer.
+  let lines =<< trim [SCRIPT]
+    au WinNew * smile
+  [SCRIPT]
+  call writefile(lines, 'XTest_cmdwin')
+
+  let buf = RunVimInTerminal('-S XTest_cmdwin', {'rows': 18})
+  " open cmdwin
+  call term_sendkeys(buf, "q:")
+  call WaitForAssert({-> assert_match('-- More --', term_getline(buf, 18))})
+  " quit more prompt for :smile command
+  call term_sendkeys(buf, "q")
+  call WaitForAssert({-> assert_match('^$', term_getline(buf, 18))})
+  " execute a simple command
+  call term_sendkeys(buf, "aecho 'done'\<CR>")
+  call VerifyScreenDump(buf, 'Test_cmdwin_interrupted', {})
+
+  " clean up
+  call StopVimInTerminal(buf)
+  call delete('XTest_cmdwin')
 endfunc
 
 " Test for backtick expression in the command line
@@ -1193,9 +1373,7 @@ endfunc
 
 " Test for the :! command
 func Test_cmd_bang()
-  if !has('unix')
-    return
-  endif
+  CheckUnix
 
   let lines =<< trim [SCRIPT]
     " Test for no previous command
@@ -1218,6 +1396,22 @@ func Test_cmd_bang()
   endif
   call delete('Xscript')
   call delete('Xresult')
+endfunc
+
+" Test error: "E135: *Filter* Autocommands must not change current buffer"
+func Test_cmd_bang_E135()
+  new
+  call setline(1, ['a', 'b', 'c', 'd'])
+  augroup test_cmd_filter_E135
+    au!
+    autocmd FilterReadPost * help
+  augroup END
+  call assert_fails('2,3!echo "x"', 'E135:')
+
+  augroup test_cmd_filter_E135
+    au!
+  augroup END
+  %bwipe!
 endfunc
 
 " Test for using ~ for home directory in cmdline completion matches
@@ -1430,6 +1624,8 @@ endfunc
 
 " Test for recursively getting multiple command line inputs
 func Test_cmdwin_multi_input()
+  CheckFeature cmdwin
+
   call feedkeys(":\<C-R>=input('P: ')\<CR>\"cyan\<CR>\<CR>", 'xt')
   call assert_equal('"cyan', @:)
 endfunc
@@ -1454,16 +1650,41 @@ endfunc
 
 " Test for normal mode commands not supported in the cmd window
 func Test_cmdwin_blocked_commands()
+  CheckFeature cmdwin
+
   call assert_fails('call feedkeys("q:\<C-T>\<CR>", "xt")', 'E11:')
   call assert_fails('call feedkeys("q:\<C-]>\<CR>", "xt")', 'E11:')
   call assert_fails('call feedkeys("q:\<C-^>\<CR>", "xt")', 'E11:')
   call assert_fails('call feedkeys("q:Q\<CR>", "xt")', 'E11:')
   call assert_fails('call feedkeys("q:Z\<CR>", "xt")', 'E11:')
   call assert_fails('call feedkeys("q:\<F1>\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>s\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>v\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>^\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>n\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>z\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>o\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>w\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>j\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>k\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>h\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>l\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>T\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>x\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>r\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>R\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>K\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>}\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>]\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>f\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>d\<CR>", "xt")', 'E11:')
+  call assert_fails('call feedkeys("q:\<C-W>g\<CR>", "xt")', 'E11:')
 endfunc
 
 " Close the Cmd-line window in insert mode using CTRL-C
 func Test_cmdwin_insert_mode_close()
+  CheckFeature cmdwin
+
   %bw!
   let s = ''
   exe "normal q:a\<C-C>let s='Hello'\<CR>"
@@ -1481,5 +1702,53 @@ func Test_zero_line_search()
   q!
 endfunc
 
+func Test_read_shellcmd()
+  CheckUnix
+  if executable('ls')
+    " There should be ls in the $PATH
+    call feedkeys(":r! l\<c-a>\<c-b>\"\<cr>", 'tx')
+    call assert_match('^"r! .*\<ls\>', @:)
+  endif
+
+  if executable('rm')
+    call feedkeys(":r! ++enc=utf-8 r\<c-a>\<c-b>\"\<cr>", 'tx')
+    call assert_notmatch('^"r!.*\<runtest.vim\>', @:)
+    call assert_match('^"r!.*\<rm\>', @:)
+
+    call feedkeys(":r ++enc=utf-8 !rm\<c-a>\<c-b>\"\<cr>", 'tx')
+    call assert_notmatch('^"r.*\<runtest.vim\>', @:)
+    call assert_match('^"r ++enc\S\+ !.*\<rm\>', @:)
+  endif
+endfunc
+
+" Test for going up and down the directory tree using 'wildmenu'
+func Test_wildmenu_dirstack()
+  CheckUnix
+  %bw!
+  call mkdir('Xdir1/dir2/dir3', 'p')
+  call writefile([], 'Xdir1/file1_1.txt')
+  call writefile([], 'Xdir1/file1_2.txt')
+  call writefile([], 'Xdir1/dir2/file2_1.txt')
+  call writefile([], 'Xdir1/dir2/file2_2.txt')
+  call writefile([], 'Xdir1/dir2/dir3/file3_1.txt')
+  call writefile([], 'Xdir1/dir2/dir3/file3_2.txt')
+  cd Xdir1/dir2/dir3
+  set wildmenu
+
+  call feedkeys(":e \<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"e file3_1.txt', @:)
+  call feedkeys(":e \<Tab>\<Up>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"e ../dir3/', @:)
+  call feedkeys(":e \<Tab>\<Up>\<Up>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"e ../../dir2/', @:)
+  call feedkeys(":e \<Tab>\<Up>\<Up>\<Down>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"e ../../dir2/dir3/', @:)
+  call feedkeys(":e \<Tab>\<Up>\<Up>\<Down>\<Down>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"e ../../dir2/dir3/file3_1.txt', @:)
+
+  cd -
+  call delete('Xdir1', 'rf')
+  set wildmenu&
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

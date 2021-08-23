@@ -78,6 +78,7 @@ enum SpecialKey
     KS_MB,	// blink mode
     KS_CAF,	// set foreground color (ANSI)
     KS_CAB,	// set background color (ANSI)
+    KS_CAU,	// set underline color (ANSI)
     KS_LE,	// cursor left (mostly backspace)
     KS_ND,	// cursor right
     KS_CIS,	// set icon text start
@@ -100,6 +101,7 @@ enum SpecialKey
     KS_U7,	// request cursor position
     KS_8F,	// set foreground color (RGB)
     KS_8B,	// set background color (RGB)
+    KS_8U,	// set underline color (RGB)
     KS_CBE,	// enable bracketed paste mode
     KS_CBD,	// disable bracketed paste mode
     KS_CPS,	// start of bracketed paste
@@ -107,10 +109,12 @@ enum SpecialKey
     KS_CST,	// save window title
     KS_CRT,	// restore window title
     KS_SSI,	// save icon text
-    KS_SRI	// restore icon text
+    KS_SRI,	// restore icon text
+    KS_FD,	// disable focus event tracking
+    KS_FE	// enable focus event tracking
 };
 
-#define KS_LAST	    KS_SRI
+#define KS_LAST	    KS_FE
 
 /*
  * the terminal capabilities are stored in this array
@@ -179,6 +183,7 @@ extern char_u *(term_strings[]);    // current terminal strings
 #define T_MB	(TERM_STR(KS_MB))	// blink mode
 #define T_CAF	(TERM_STR(KS_CAF))	// set foreground color (ANSI)
 #define T_CAB	(TERM_STR(KS_CAB))	// set background color (ANSI)
+#define T_CAU	(TERM_STR(KS_CAU))	// set underline color (ANSI)
 #define T_LE	(TERM_STR(KS_LE))	// cursor left
 #define T_ND	(TERM_STR(KS_ND))	// cursor right
 #define T_CIS	(TERM_STR(KS_CIS))	// set icon text start
@@ -200,6 +205,7 @@ extern char_u *(term_strings[]);    // current terminal strings
 #define T_U7	(TERM_STR(KS_U7))	// request cursor position
 #define T_8F	(TERM_STR(KS_8F))	// set foreground color (RGB)
 #define T_8B	(TERM_STR(KS_8B))	// set background color (RGB)
+#define T_8U	(TERM_STR(KS_8U))	// set underline color (RGB)
 #define T_BE	(TERM_STR(KS_CBE))	// enable bracketed paste mode
 #define T_BD	(TERM_STR(KS_CBD))	// disable bracketed paste mode
 #define T_PS	(TERM_STR(KS_CPS))	// start of bracketed paste
@@ -208,6 +214,8 @@ extern char_u *(term_strings[]);    // current terminal strings
 #define T_CRT	(TERM_STR(KS_CRT))	// restore window title
 #define T_SSI	(TERM_STR(KS_SSI))	// save icon text
 #define T_SRI	(TERM_STR(KS_SRI))	// restore icon text
+#define T_FD	(TERM_STR(KS_FD))	// disable focus event tracking
+#define T_FE	(TERM_STR(KS_FE))	// enable focus event tracking
 
 typedef enum {
     TMODE_COOK,	    // terminal mode for external cmds and Ex mode

@@ -555,6 +555,47 @@ func_do_profile(ufunc_T *fp)
 }
 
 /*
+ * When calling a function: may initialize for profiling.
+ */
+    void
+profile_may_start_func(profinfo_T *info, ufunc_T *fp, ufunc_T *caller)
+{
+    if (!fp->uf_profiling && has_profiling(FALSE, fp->uf_name, NULL))
+    {
+	info->pi_started_profiling = TRUE;
+	func_do_profile(fp);
+    }
+    if (fp->uf_profiling || (caller != NULL && caller->uf_profiling))
+    {
+	++fp->uf_tm_count;
+	profile_start(&info->pi_call_start);
+	profile_zero(&fp->uf_tm_children);
+    }
+    script_prof_save(&info->pi_wait_start);
+}
+
+/*
+ * After calling a function: may handle profiling.  profile_may_start_func()
+ * must have been called previously.
+ */
+    void
+profile_may_end_func(profinfo_T *info, ufunc_T *fp, ufunc_T *caller)
+{
+    profile_end(&info->pi_call_start);
+    profile_sub_wait(&info->pi_wait_start, &info->pi_call_start);
+    profile_add(&fp->uf_tm_total, &info->pi_call_start);
+    profile_self(&fp->uf_tm_self, &info->pi_call_start, &fp->uf_tm_children);
+    if (caller != NULL && caller->uf_profiling)
+    {
+	profile_add(&caller->uf_tm_children, &info->pi_call_start);
+	profile_add(&caller->uf_tml_children, &info->pi_call_start);
+    }
+    if (info->pi_started_profiling)
+	// make a ":profdel func" stop profiling the function
+	fp->uf_profiling = FALSE;
+}
+
+/*
  * Prepare profiling for entering a child or something else that is not
  * counted for the script/function itself.
  * Should always be called in pair with prof_child_exit().
@@ -597,15 +638,14 @@ prof_child_exit(
  * until later and we need to store the time now.
  */
     void
-func_line_start(void *cookie)
+func_line_start(void *cookie, long lnum)
 {
     funccall_T	*fcp = (funccall_T *)cookie;
     ufunc_T	*fp = fcp->func;
 
-    if (fp->uf_profiling && SOURCING_LNUM >= 1
-				      && SOURCING_LNUM <= fp->uf_lines.ga_len)
+    if (fp->uf_profiling && lnum >= 1 && lnum <= fp->uf_lines.ga_len)
     {
-	fp->uf_tml_idx = SOURCING_LNUM - 1;
+	fp->uf_tml_idx = lnum - 1;
 	// Skip continuation lines.
 	while (fp->uf_tml_idx > 0 && FUNCLINE(fp, fp->uf_tml_idx) == NULL)
 	    --fp->uf_tml_idx;
@@ -761,7 +801,7 @@ script_prof_save(
 {
     scriptitem_T    *si;
 
-    if (current_sctx.sc_sid > 0 && current_sctx.sc_sid <= script_items.ga_len)
+    if (SCRIPT_ID_VALID(current_sctx.sc_sid))
     {
 	si = SCRIPT_ITEM(current_sctx.sc_sid);
 	if (si->sn_prof_on && si->sn_pr_nest++ == 0)
@@ -778,7 +818,7 @@ script_prof_restore(proftime_T *tm)
 {
     scriptitem_T    *si;
 
-    if (current_sctx.sc_sid > 0 && current_sctx.sc_sid <= script_items.ga_len)
+    if (SCRIPT_ID_VALID(current_sctx.sc_sid))
     {
 	si = SCRIPT_ITEM(current_sctx.sc_sid);
 	if (si->sn_prof_on && --si->sn_pr_nest == 0)
@@ -903,7 +943,7 @@ script_line_start(void)
     scriptitem_T    *si;
     sn_prl_T	    *pp;
 
-    if (current_sctx.sc_sid <= 0 || current_sctx.sc_sid > script_items.ga_len)
+    if (!SCRIPT_ID_VALID(current_sctx.sc_sid))
 	return;
     si = SCRIPT_ITEM(current_sctx.sc_sid);
     if (si->sn_prof_on && SOURCING_LNUM >= 1)
@@ -938,7 +978,7 @@ script_line_exec(void)
 {
     scriptitem_T    *si;
 
-    if (current_sctx.sc_sid <= 0 || current_sctx.sc_sid > script_items.ga_len)
+    if (!SCRIPT_ID_VALID(current_sctx.sc_sid))
 	return;
     si = SCRIPT_ITEM(current_sctx.sc_sid);
     if (si->sn_prof_on && si->sn_prl_idx >= 0)
@@ -954,7 +994,7 @@ script_line_end(void)
     scriptitem_T    *si;
     sn_prl_T	    *pp;
 
-    if (current_sctx.sc_sid <= 0 || current_sctx.sc_sid > script_items.ga_len)
+    if (!SCRIPT_ID_VALID(current_sctx.sc_sid))
 	return;
     si = SCRIPT_ITEM(current_sctx.sc_sid);
     if (si->sn_prof_on && si->sn_prl_idx >= 0

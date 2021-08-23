@@ -432,7 +432,8 @@ get_indent_str(
     {
 	if (*ptr == TAB)
 	{
-	    if (!list || lcs_tab1)    // count a tab for what it is worth
+	    if (!list || curwin->w_lcs_chars.tab1)
+		// count a tab for what it is worth
 		count += ts - (count % ts);
 	    else
 		// In list mode, when tab is not set, count screen char width
@@ -462,7 +463,7 @@ get_indent_str_vtab(char_u *ptr, int ts, int *vts, int list)
     {
 	if (*ptr == TAB)    // count a tab for what it is worth
 	{
-	    if (!list || lcs_tab1)
+	    if (!list || curwin->w_lcs_chars.tab1)
 		count += tabstop_padding(count, ts, vts);
 	    else
 		// In list mode, when tab is not set, count screen char width
@@ -757,6 +758,10 @@ set_indent(
     // Replace the line (unless undo fails).
     if (!(flags & SIN_UNDO) || u_savesub(curwin->w_cursor.lnum) == OK)
     {
+	colnr_T old_offset = (colnr_T)(p - oldline);
+	colnr_T new_offset = (colnr_T)(s - newline);
+
+	// this may free "newline"
 	ml_replace(curwin->w_cursor.lnum, newline, FALSE);
 	if (flags & SIN_CHANGED)
 	    changed_bytes(curwin->w_cursor.lnum, 0);
@@ -764,24 +769,24 @@ set_indent(
 	// Correct saved cursor position if it is in this line.
 	if (saved_cursor.lnum == curwin->w_cursor.lnum)
 	{
-	    if (saved_cursor.col >= (colnr_T)(p - oldline))
+	    if (saved_cursor.col >= old_offset)
 		// cursor was after the indent, adjust for the number of
 		// bytes added/removed
-		saved_cursor.col += ind_len - (colnr_T)(p - oldline);
-	    else if (saved_cursor.col >= (colnr_T)(s - newline))
+		saved_cursor.col += ind_len - old_offset;
+	    else if (saved_cursor.col >= new_offset)
 		// cursor was in the indent, and is now after it, put it back
 		// at the start of the indent (replacing spaces with TAB)
-		saved_cursor.col = (colnr_T)(s - newline);
+		saved_cursor.col = new_offset;
 	}
 #ifdef FEAT_PROP_POPUP
 	{
-	    int added = ind_len - (colnr_T)(p - oldline);
+	    int added = ind_len - old_offset;
 
 	    // When increasing indent this behaves like spaces were inserted at
 	    // the old indent, when decreasing indent it behaves like spaces
 	    // were deleted at the new indent.
 	    adjust_prop_columns(curwin->w_cursor.lnum,
-		 (colnr_T)(added > 0 ? (p - oldline) : ind_len), added, 0);
+			  added > 0 ? old_offset : (colnr_T)ind_len, added, 0);
 	}
 #endif
 	retval = TRUE;
@@ -1045,7 +1050,7 @@ op_reindent(oparg_T *oap, int (*how)(void))
 	smsg(NGETTEXT("%ld line indented ",
 						 "%ld lines indented ", i), i);
     }
-    if (!cmdmod.lockmarks)
+    if ((cmdmod.cmod_flags & CMOD_LOCKMARKS) == 0)
     {
 	// set '[ and '] marks
 	curbuf->b_op_start = oap->start;
@@ -1658,7 +1663,9 @@ ex_retab(exarg_T *eap)
 			ptr = new_line + start_col;
 			for (col = 0; col < len; col++)
 			    ptr[col] = (col < num_tabs) ? '\t' : ' ';
-			ml_replace(lnum, new_line, FALSE);
+			if (ml_replace(lnum, new_line, FALSE) == OK)
+			    // "new_line" may have been copied
+			    new_line = curbuf->b_ml.ml_line_ptr;
 			if (first_line == 0)
 			    first_line = lnum;
 			last_line = lnum;

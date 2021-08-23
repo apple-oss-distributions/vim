@@ -24,9 +24,6 @@ static int	compl_busy = FALSE;
 
 
 static void ins_ctrl_v(void);
-#ifdef FEAT_JOB_CHANNEL
-static void init_prompt(int cmdchar_todo);
-#endif
 static void insert_special(int, int, int);
 static void redo_literal(int c);
 static void start_arrow_common(pos_T *end_insert_pos, int change);
@@ -199,6 +196,10 @@ edit(
 #endif
 	ins_apply_autocmds(EVENT_INSERTENTER);
 
+	// Check for changed highlighting, e.g. for ModeMsg.
+	if (need_highlight_changed)
+	    highlight_changed();
+
 	// Make sure the cursor didn't move.  Do call check_cursor_col() in
 	// case the text was modified.  Since Insert mode was not started yet
 	// a call to check_cursor_col() may move the cursor, especially with
@@ -315,6 +316,9 @@ edit(
 #endif
     if (!p_ek)
     {
+#ifdef FEAT_JOB_CHANNEL
+	ch_log_output = TRUE;
+#endif
 	// Disable bracketed paste mode, we won't recognize the escape
 	// sequences.
 	out_str(T_BD);
@@ -587,8 +591,11 @@ edit(
 		if (stop_insert_mode)
 		{
 		    // Insert mode ended, possibly from a callback.
+		    if (c != K_IGNORE && c != K_NOP)
+			vungetc(c);
 		    count = 0;
 		    nomove = TRUE;
+		    ins_compl_prep(ESC);
 		    goto doESCkey;
 		}
 	    } while (c == K_IGNORE || c == K_NOP);
@@ -1026,6 +1033,15 @@ doESCkey:
 #endif
 
 	case K_IGNORE:	// Something mapped to nothing
+	    break;
+
+	case K_COMMAND:		// <Cmd>command<CR>
+	    do_cmdline(NULL, getcmdkeycmd, NULL, 0);
+#ifdef FEAT_TERMINAL
+	    if (term_use_loop())
+		// Started a terminal that gets the input, exit Insert mode.
+		goto doESCkey;
+#endif
 	    break;
 
 	case K_CURSORHOLD:	// Didn't type something for a while.
@@ -1524,7 +1540,6 @@ ins_ctrl_v(void)
 {
     int		c;
     int		did_putchar = FALSE;
-    int		prev_mod_mask = mod_mask;
 
     // may need to redraw when no more chars available now
     ins_redraw(FALSE);
@@ -1540,7 +1555,9 @@ ins_ctrl_v(void)
     add_to_showcmd_c(Ctrl_V);
 #endif
 
-    c = get_literal();
+    // Do not change any modifyOtherKeys ESC sequence to a normal key for
+    // CTRL-SHIFT-V.
+    c = get_literal(mod_mask & MOD_MASK_SHIFT);
     if (did_putchar)
 	// when the line fits in 'columns' the '^' is at the start of the next
 	// line and will not removed by the redraw
@@ -1548,11 +1565,6 @@ ins_ctrl_v(void)
 #ifdef FEAT_CMDL_INFO
     clear_showcmd();
 #endif
-
-    if ((c == ESC || c == CSI) && !(prev_mod_mask & MOD_MASK_SHIFT))
-	// Using CTRL-V: Change any modifyOtherKeys ESC sequence to a normal
-	// key.  Don't do this for CTRL-SHIFT-V.
-	c = decodeModifyOtherKeys(c);
 
     insert_special(c, FALSE, TRUE);
 #ifdef FEAT_RIGHTLEFT
@@ -1580,7 +1592,7 @@ decodeModifyOtherKeys(int c)
     // Recognize:
     // form 0: {lead}{key};{modifier}u
     // form 1: {lead}27;{modifier};{key}~
-    if ((c == CSI || (c == ESC && *p == '[')) && typebuf.tb_len >= 4)
+    if (typebuf.tb_len >= 4 && (c == CSI || (c == ESC && *p == '[')))
     {
 	idx = (*p == '[');
 	if (p[idx] == '2' && p[idx + 1] == '7' && p[idx + 2] == ';')
@@ -1611,7 +1623,7 @@ decodeModifyOtherKeys(int c)
 #endif
 
 	    mod_mask = decode_modifiers(arg[!form]);
-	    c = merge_modifyOtherKeys(arg[form]);
+	    c = merge_modifyOtherKeys(arg[form], &mod_mask);
 	}
     }
 
@@ -1682,72 +1694,19 @@ edit_putchar(int c, int highlight)
     }
 }
 
-#if defined(FEAT_JOB_CHANNEL) || defined(PROTO)
 /*
- * Return the effective prompt for the current buffer.
+ * Set the insert start position for when using a prompt buffer.
  */
-    char_u *
-prompt_text(void)
+    void
+set_insstart(linenr_T lnum, int col)
 {
-    if (curbuf->b_prompt_text == NULL)
-	return (char_u *)"% ";
-    return curbuf->b_prompt_text;
+    Insstart.lnum = lnum;
+    Insstart.col = col;
+    Insstart_orig = Insstart;
+    Insstart_textlen = Insstart.col;
+    Insstart_blank_vcol = MAXCOL;
+    arrow_used = FALSE;
 }
-
-/*
- * Prepare for prompt mode: Make sure the last line has the prompt text.
- * Move the cursor to this line.
- */
-    static void
-init_prompt(int cmdchar_todo)
-{
-    char_u *prompt = prompt_text();
-    char_u *text;
-
-    curwin->w_cursor.lnum = curbuf->b_ml.ml_line_count;
-    text = ml_get_curline();
-    if (STRNCMP(text, prompt, STRLEN(prompt)) != 0)
-    {
-	// prompt is missing, insert it or append a line with it
-	if (*text == NUL)
-	    ml_replace(curbuf->b_ml.ml_line_count, prompt, TRUE);
-	else
-	    ml_append(curbuf->b_ml.ml_line_count, prompt, 0, FALSE);
-	curwin->w_cursor.lnum = curbuf->b_ml.ml_line_count;
-	coladvance((colnr_T)MAXCOL);
-	changed_bytes(curbuf->b_ml.ml_line_count, 0);
-    }
-
-    // Insert always starts after the prompt, allow editing text after it.
-    if (Insstart_orig.lnum != curwin->w_cursor.lnum
-				   || Insstart_orig.col != (int)STRLEN(prompt))
-    {
-	Insstart.lnum = curwin->w_cursor.lnum;
-	Insstart.col = (int)STRLEN(prompt);
-	Insstart_orig = Insstart;
-	Insstart_textlen = Insstart.col;
-	Insstart_blank_vcol = MAXCOL;
-	arrow_used = FALSE;
-    }
-
-    if (cmdchar_todo == 'A')
-	coladvance((colnr_T)MAXCOL);
-    if (cmdchar_todo == 'I' || curwin->w_cursor.col <= (int)STRLEN(prompt))
-	curwin->w_cursor.col = (int)STRLEN(prompt);
-    // Make sure the cursor is in a valid position.
-    check_cursor();
-}
-
-/*
- * Return TRUE if the cursor is in the editable position of the prompt line.
- */
-    int
-prompt_curpos_editable()
-{
-    return curwin->w_cursor.lnum == curbuf->b_ml.ml_line_count
-	&& curwin->w_cursor.col >= (int)STRLEN(prompt_text());
-}
-#endif
 
 /*
  * Undo the previous edit_putchar().
@@ -1888,9 +1847,11 @@ del_char_after_col(int limit_col UNUSED)
  * A one, two or three digit decimal number is interpreted as its byte value.
  * If one or two digits are entered, the next character is given to vungetc().
  * For Unicode a character > 255 may be returned.
+ * If "noReduceKeys" is TRUE do not change any modifyOtherKeys ESC sequence
+ * into a normal key, return ESC.
  */
     int
-get_literal(void)
+get_literal(int noReduceKeys)
 {
     int		cc;
     int		nc;
@@ -1921,6 +1882,9 @@ get_literal(void)
     for (;;)
     {
 	nc = plain_vgetc();
+	if ((nc == ESC || nc == CSI) && !noReduceKeys)
+	    nc = decodeModifyOtherKeys(nc);
+
 #ifdef FEAT_CMDL_INFO
 	if (!(State & CMDLINE) && MB_BYTE2LEN_CHECK(nc) == 1)
 	    add_to_showcmd(nc);
@@ -3454,7 +3418,7 @@ ins_reg(void)
 	    AppendCharToRedobuff(literally);
 	    AppendCharToRedobuff(regname);
 
-	    do_put(regname, BACKWARD, 1L,
+	    do_put(regname, NULL, BACKWARD, 1L,
 		 (literally == Ctrl_P ? PUT_FIXINDENT : 0) | PUT_CURSEND);
 	}
 	else if (insert_reg(regname, literally) == FAIL)
@@ -3659,13 +3623,16 @@ ins_esc(
 	undisplay_dollar();
     }
 
+    if (cmdchar != 'r' && cmdchar != 'v')
+	ins_apply_autocmds(EVENT_INSERTLEAVEPRE);
+
     // When an autoindent was removed, curswant stays after the
     // indent
     if (restart_edit == NUL && (colnr_T)temp == curwin->w_cursor.col)
 	curwin->w_set_curswant = TRUE;
 
     // Remember the last Insert position in the '^ mark.
-    if (!cmdmod.keepjumps)
+    if ((cmdmod.cmod_flags & CMOD_KEEPJUMPS) == 0)
 	curbuf->b_last_insert = curwin->w_cursor;
 
     /*
@@ -3716,6 +3683,9 @@ ins_esc(
 #endif
     if (!p_ek)
     {
+#ifdef FEAT_JOB_CHANNEL
+	ch_log_output = TRUE;
+#endif
 	// Re-enable bracketed paste mode.
 	out_str(T_BE);
 
@@ -3849,8 +3819,7 @@ ins_ctrl_o(void)
 {
     if (State & VREPLACE_FLAG)
 	restart_edit = 'V';
-    else
-	if (State & REPLACE_FLAG)
+    else if (State & REPLACE_FLAG)
 	restart_edit = 'R';
     else
 	restart_edit = 'I';
@@ -3992,8 +3961,11 @@ ins_bs(
 #endif
 		((curwin->w_cursor.lnum == 1 && curwin->w_cursor.col == 0)
 		    || (!can_bs(BS_START)
-			&& (arrow_used
-			    || (curwin->w_cursor.lnum == Insstart_orig.lnum
+			&& ((arrow_used
+#ifdef FEAT_JOB_CHANNEL
+				&& !bt_prompt(curbuf)
+#endif
+			) || (curwin->w_cursor.lnum == Insstart_orig.lnum
 				&& curwin->w_cursor.col <= Insstart_orig.col)))
 		    || (!can_bs(BS_INDENT) && !arrow_used && ai_col > 0
 					 && curwin->w_cursor.col <= ai_col)
@@ -4828,7 +4800,7 @@ ins_pagedown(void)
     static void
 ins_drop(void)
 {
-    do_put('~', BACKWARD, 1L, PUT_CURSEND);
+    do_put('~', NULL, BACKWARD, 1L, PUT_CURSEND);
 }
 #endif
 

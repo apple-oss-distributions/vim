@@ -95,8 +95,8 @@ static Atom   wm_atoms[2];	// Window Manager Atoms
  * normal font (current_fontset == NULL, use gui.text_gc and gui.back_gc).
  */
 static XFontSet current_fontset = NULL;
-
-#define XDrawString(dpy, win, gc, x, y, str, n) \
+# if !defined(XDrawString)
+#  define XDrawString(dpy, win, gc, x, y, str, n) \
 	do \
 	{ \
 	    if (current_fontset != NULL) \
@@ -104,8 +104,9 @@ static XFontSet current_fontset = NULL;
 	    else \
 		XDrawString(dpy, win, gc, x, y, str, n); \
 	} while (0)
-
-#define XDrawString16(dpy, win, gc, x, y, str, n) \
+# endif
+# if !defined(XDrawString16)
+#  define XDrawString16(dpy, win, gc, x, y, str, n) \
 	do \
 	{ \
 	    if (current_fontset != NULL) \
@@ -113,8 +114,9 @@ static XFontSet current_fontset = NULL;
 	    else \
 		XDrawString16(dpy, win, gc, x, y, (XChar2b *)str, n); \
 	} while (0)
-
-#define XDrawImageString16(dpy, win, gc, x, y, str, n) \
+# endif
+# if !defined(XDrawImageString16)
+#  define XDrawImageString16(dpy, win, gc, x, y, str, n) \
 	do \
 	{ \
 	    if (current_fontset != NULL) \
@@ -122,7 +124,7 @@ static XFontSet current_fontset = NULL;
 	    else \
 		XDrawImageString16(dpy, win, gc, x, y, (XChar2b *)str, n); \
 	} while (0)
-
+# endif
 static int check_fontset_sanity(XFontSet fs);
 static int fontset_width(XFontSet fs);
 static int fontset_ascent(XFontSet fs);
@@ -938,7 +940,10 @@ gui_x11_key_hit_cb(
     if (len == -3)
 	key = TO_SPECIAL(string[1], string[2]);
     else
-	key = string[0];
+    {
+	string[len] = NUL;
+	key = mb_ptr2char(string);
+    }
     key = simplify_key(key, &modifiers);
     if (key == CSI)
 	key = K_CSI;
@@ -951,13 +956,14 @@ gui_x11_key_hit_cb(
     }
     else
     {
-	string[0] = key;
-	len = 1;
+	len = mb_char2bytes(key, string);
+
+	// Some keys need adjustment when the Ctrl modifier is used.
+	key = may_adjust_key_for_ctrl(modifiers, key);
 
 	// Remove the SHIFT modifier for keys where it's already included,
 	// e.g., '(', '!' and '*'.
-	if (!ASCII_ISALPHA(key) && key > 0x20 && key < 0x7f)
-	    modifiers &= ~MOD_MASK_SHIFT;
+	modifiers = may_remove_shift_modifier(modifiers, key);
     }
 
     if (modifiers != 0)
@@ -968,14 +974,16 @@ gui_x11_key_hit_cb(
 	add_to_input_buf(string2, 3);
     }
 
-    if (len == 1 && ((string[0] == Ctrl_C && ctrl_c_interrupts)
-#ifdef UNIX
-	    || (intr_char != 0 && string[0] == intr_char)
-#endif
-	    ))
+    // Check if the key interrupts.
     {
-	trash_input_buf();
-	got_int = TRUE;
+	int int_ch = check_for_interrupt(key, modifiers);
+
+	if (int_ch != NUL)
+	{
+	    trash_input_buf();
+	    string[0] = int_ch;
+	    len = 1;
+	}
     }
 
     add_to_input_buf(string, len);

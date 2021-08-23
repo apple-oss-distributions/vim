@@ -24,10 +24,9 @@ endfunc
 
 " As for non-GUI, a balloon_show() test was already added with patch 8.0.0401
 func Test_balloon_show()
-  if has('balloon_eval')
-    " This won't do anything but must not crash either.
-    call balloon_show('hi!')
-  endif
+  CheckFeature balloon_eval
+  " This won't do anything but must not crash either.
+  call balloon_show('hi!')
 endfunc
 
 func Test_colorscheme()
@@ -177,9 +176,7 @@ func Test_set_background()
 endfunc
 
 func Test_set_balloondelay()
-  if !exists('+balloondelay')
-    return
-  endif
+  CheckOption balloondelay
 
   let balloondelay_saved = &balloondelay
 
@@ -214,9 +211,7 @@ func Test_set_balloondelay()
 endfunc
 
 func Test_set_ballooneval()
-  if !exists('+ballooneval')
-    return
-  endif
+  CheckOption ballooneval
 
   let ballooneval_saved = &ballooneval
 
@@ -233,9 +228,7 @@ func Test_set_ballooneval()
 endfunc
 
 func Test_set_balloonexpr()
-  if !exists('+balloonexpr')
-    return
-  endif
+  CheckOption balloonexpr
 
   let balloonexpr_saved = &balloonexpr
 
@@ -395,6 +388,20 @@ func Test_set_guifont()
     call assert_fails('set guifont=xa1bc23d7f', 'E596:')
   endif
 
+  " This only works if 'renderoptions' exists and does not work for Windows XP
+  " and older. 
+  if exists('+renderoptions') && windowsversion() !~ '^[345]\.'
+    " doing this four times used to cause a crash
+    set renderoptions=type:directx
+    for i in range(5)
+      set guifont=
+    endfor
+    set renderoptions=
+    for i in range(5)
+      set guifont=
+    endfor
+  endif
+
   if has('xfontset')
     let &guifontset = guifontset_saved
   endif
@@ -532,7 +539,7 @@ func Test_set_guifontwide()
         set guifontset=-*-notexist-*
         call assert_report("'set guifontset=-*-notexist-*' should have failed")
       catch
-        call assert_exception('E598')
+        call assert_exception('E598:')
       endtry
       " Set it to an invalid value brutally for preparation.
       let &guifontset = '-*-notexist-*'
@@ -746,6 +753,9 @@ func Test_menu()
 
   " Check deleting menu doesn't cause trouble.
   aunmenu Help
+  if exists(':tlmenu')
+    tlunmenu Help
+  endif
   call assert_fails('menu Help', 'E329:')
 endfunc
 
@@ -764,17 +774,16 @@ endfunc
 
 func Test_encoding_conversion()
   " GTK supports conversion between 'encoding' and "utf-8"
-  if has('gui_gtk')
-    let encoding_saved = &encoding
-    set encoding=latin1
+  CheckFeature gui_gtk
+  let encoding_saved = &encoding
+  set encoding=latin1
 
-    " would be nice if we could take a screenshot
-    intro
-    " sets the window title
-    edit SomeFile
+  " would be nice if we could take a screenshot
+  intro
+  " sets the window title
+  edit SomeFile
 
-    let &encoding = encoding_saved
-  endif
+  let &encoding = encoding_saved
 endfunc
 
 func Test_shell_command()
@@ -854,6 +863,16 @@ func Test_gui_run_cmd_in_terminal()
   " TODO: how to check that the command ran in a separate terminal?
   " Maybe check for $TERM (dumb vs xterm) in the spawned shell?
   let &guioptions = save_guioptions
+endfunc
+
+func Test_gui_recursive_mapping()
+  nmap ' <C-W>
+  nmap <C-W>a :let didit = 1<CR>
+  call feedkeys("'a", 'xt')
+  call assert_equal(1, didit)
+
+  nunmap '
+  nunmap <C-W>a
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -388,7 +388,7 @@ CVim::Eval(BSTR expr, BSTR *result)
 
     /* Evaluate the expression */
     ++emsg_skip;
-    str = (char *)eval_to_string((char_u *)buffer, NULL, TRUE);
+    str = (char *)eval_to_string((char_u *)buffer, TRUE);
     --emsg_skip;
     vim_free(buffer);
     if (str == NULL)
@@ -635,7 +635,7 @@ static void GUIDtochar(const GUID &guid, char *GUID, int length)
     LPOLESTR wGUID = NULL;
     StringFromCLSID(guid, &wGUID);
 
-    // Covert from wide characters to non-wide
+    // Convert from wide characters to non-wide
     wcstombs(GUID, wGUID, length);
 
     // Free memory

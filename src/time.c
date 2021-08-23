@@ -314,6 +314,7 @@ f_strptime(typval_T *argvars, typval_T *rettv)
     char_u	*enc;
 
     CLEAR_FIELD(tmval);
+    tmval.tm_isdst = -1;
     fmt = tv_get_string(&argvars[0]);
     str = tv_get_string(&argvars[1]);
 
@@ -477,6 +478,7 @@ check_due_timer(void)
 	    int save_must_redraw = must_redraw;
 	    int save_trylevel = trylevel;
 	    int save_did_throw = did_throw;
+	    int save_need_rethrow = need_rethrow;
 	    int save_ex_pressedreturn = get_pressedreturn();
 	    int save_may_garbage_collect = may_garbage_collect;
 	    except_T *save_current_exception = current_exception;
@@ -492,14 +494,17 @@ check_due_timer(void)
 	    must_redraw = 0;
 	    trylevel = 0;
 	    did_throw = FALSE;
+	    need_rethrow = FALSE;
 	    current_exception = NULL;
 	    may_garbage_collect = FALSE;
 	    save_vimvars(&vvsave);
 
+	    // Invoke the callback.
 	    timer->tr_firing = TRUE;
 	    timer_callback(timer);
 	    timer->tr_firing = FALSE;
 
+	    // Restore stuff.
 	    timer_next = timer->tr_next;
 	    did_one = TRUE;
 	    timer_busy = save_timer_busy;
@@ -510,6 +515,7 @@ check_due_timer(void)
 	    called_emsg = save_called_emsg;
 	    trylevel = save_trylevel;
 	    did_throw = save_did_throw;
+	    need_rethrow = save_need_rethrow;
 	    current_exception = save_current_exception;
 	    restore_vimvars(&vvsave);
 	    if (must_redraw != 0)
@@ -741,7 +747,7 @@ f_timer_info(typval_T *argvars, typval_T *rettv)
 f_timer_pause(typval_T *argvars, typval_T *rettv UNUSED)
 {
     timer_T	*timer = NULL;
-    int		paused = (int)tv_get_number(&argvars[1]);
+    int		paused = (int)tv_get_bool(&argvars[1]);
 
     if (argvars[0].v_type != VAR_NUMBER)
 	emsg(_(e_number_exp));

@@ -1,4 +1,5 @@
 " Tests for regexp in latin1 encoding
+
 set encoding=latin1
 scriptencoding latin1
 
@@ -83,7 +84,7 @@ func Test_multi_failure()
   set re=2
   call assert_fails('/a**', 'E871:')
   call assert_fails('/a*\+', 'E871:')
-  call assert_fails('/a\{a}', 'E870:')
+  call assert_fails('/a\{a}', 'E554:')
   set re=0
 endfunc
 
@@ -910,14 +911,30 @@ func Test_start_end_of_buffer_match()
   bwipe!
 endfunc
 
+func Test_ze_before_zs()
+  call assert_equal('', matchstr(' ', '\%#=1\ze \zs'))
+  call assert_equal('', matchstr(' ', '\%#=2\ze \zs'))
+  call assert_equal(repeat([''], 10), matchlist(' ', '\%#=1\ze \zs'))
+  call assert_equal(repeat([''], 10), matchlist(' ', '\%#=2\ze \zs'))
+endfunc
+
 " Check for detecting error
 func Test_regexp_error()
   call assert_fails("call matchlist('x x', '\\%#=1 \\zs*')", 'E888:')
   call assert_fails("call matchlist('x x', '\\%#=1 \\ze*')", 'E888:')
   call assert_fails("call matchlist('x x', '\\%#=2 \\zs*')", 'E888:')
   call assert_fails("call matchlist('x x', '\\%#=2 \\ze*')", 'E888:')
-  call assert_fails('exe "normal /\\%#=1\\%[x\\%[x]]\<CR>"', 'E369:')
   call assert_fails("call matchstr('abcd', '\\%o841\\%o142')", 'E678:')
+  call assert_fails("call matchstr('abcd', '\\%#=2\\%2147483647c')", 'E951:')
+  call assert_fails("call matchstr('abcd', '\\%#=2\\%2147483647l')", 'E951:')
+  call assert_fails("call matchstr('abcd', '\\%#=2\\%2147483647v')", 'E951:')
+  call assert_fails('exe "normal /\\%#=1\\%[x\\%[x]]\<CR>"',   'E369:')
+  call assert_fails('exe "normal /\\%#=2\\%2147483647l\<CR>"', 'E951:')
+  call assert_fails('exe "normal /\\%#=2\\%2147483647c\<CR>"', 'E951:')
+  call assert_fails('exe "normal /\\%#=2\\%102261126v\<CR>"',  'E951:')
+  call assert_fails('exe "normal /\\%#=2\\%2147483646l\<CR>"', 'E486:')
+  call assert_fails('exe "normal /\\%#=2\\%2147483646c\<CR>"', 'E486:')
+  call assert_fails('exe "normal /\\%#=2\\%102261125v\<CR>"',  'E486:')
   call assert_equal('', matchstr('abcd', '\%o181\%o142'))
 endfunc
 

@@ -117,7 +117,7 @@ win_id2wp_tp(int id, tabpage_T **tpp)
 	if (wp->w_id == id)
 	{
 	    if (tpp != NULL)
-		*tpp = tp;
+		*tpp = curtab;  // any tabpage would do
 	    return wp;
 	}
 #endif
@@ -530,6 +530,22 @@ f_getwininfo(typval_T *argvars, typval_T *rettv)
 		return;
 	}
     }
+#ifdef FEAT_PROP_POPUP
+    if (wparg != NULL)
+    {
+	tabnr = 0;
+	FOR_ALL_TABPAGES(tp)
+	{
+	    tabnr++;
+	    FOR_ALL_POPUPWINS_IN_TAB(tp, wp)
+	    if (wp == wparg)
+		break;
+	}
+	d = get_win_info(wparg, tp == NULL ? 0 : tabnr, 0);
+	if (d != NULL)
+	    list_append_dict(rettv->vval.v_list, d);
+    }
+#endif
 }
 
 /*
@@ -616,6 +632,9 @@ f_tabpagenr(typval_T *argvars UNUSED, typval_T *rettv)
 	{
 	    if (STRCMP(arg, "$") == 0)
 		nr = tabpage_index(NULL) - 1;
+	    else if (STRCMP(arg, "#") == 0)
+		nr = valid_tabpage(lastused_tabpage) ?
+					tabpage_index(lastused_tabpage) : 0;
 	    else
 		semsg(_(e_invexpr2), arg);
 	}
@@ -653,6 +672,10 @@ f_win_execute(typval_T *argvars, typval_T *rettv)
     win_T	*wp = win_id2wp_tp(id, &tp);
     win_T	*save_curwin;
     tabpage_T	*save_curtab;
+
+    // Return an empty string if something fails.
+    rettv->v_type = VAR_STRING;
+    rettv->vval.v_string = NULL;
 
     if (wp != NULL && tp != NULL)
     {
@@ -829,10 +852,10 @@ f_win_splitmove(typval_T *argvars, typval_T *rettv)
         }
 
         d = argvars[2].vval.v_dict;
-        if (dict_get_number(d, (char_u *)"vertical"))
+        if (dict_get_bool(d, (char_u *)"vertical", FALSE))
             flags |= WSP_VERT;
         if ((di = dict_find(d, (char_u *)"rightbelow", -1)) != NULL)
-            flags |= tv_get_number(&di->di_tv) ? WSP_BELOW : WSP_ABOVE;
+            flags |= tv_get_bool(&di->di_tv) ? WSP_BELOW : WSP_ABOVE;
         size = (int)dict_get_number(d, (char_u *)"size");
     }
 
@@ -858,13 +881,18 @@ f_win_gettype(typval_T *argvars, typval_T *rettv)
 	    return;
 	}
     }
+    if (wp == aucmd_win)
+	rettv->vval.v_string = vim_strsave((char_u *)"autocmd");
+#if defined(FEAT_QUICKFIX)
+    else if (wp->w_p_pvw)
+	rettv->vval.v_string = vim_strsave((char_u *)"preview");
+#endif
 #ifdef FEAT_PROP_POPUP
-    if (WIN_IS_POPUP(wp))
+    else if (WIN_IS_POPUP(wp))
 	rettv->vval.v_string = vim_strsave((char_u *)"popup");
-    else
 #endif
 #ifdef FEAT_CMDWIN
-    if (wp == curwin && cmdwin_type != 0)
+    else if (wp == curwin && cmdwin_type != 0)
 	rettv->vval.v_string = vim_strsave((char_u *)"command");
 #endif
 }
@@ -979,18 +1007,25 @@ f_winnr(typval_T *argvars UNUSED, typval_T *rettv)
 f_winrestcmd(typval_T *argvars UNUSED, typval_T *rettv)
 {
     win_T	*wp;
-    int		winnr = 1;
+    int		i;
+    int		winnr;
     garray_T	ga;
     char_u	buf[50];
 
     ga_init2(&ga, (int)sizeof(char), 70);
-    FOR_ALL_WINDOWS(wp)
+
+    // Do this twice to handle some window layouts properly.
+    for (i = 0; i < 2; ++i)
     {
-	sprintf((char *)buf, "%dresize %d|", winnr, wp->w_height);
-	ga_concat(&ga, buf);
-	sprintf((char *)buf, "vert %dresize %d|", winnr, wp->w_width);
-	ga_concat(&ga, buf);
-	++winnr;
+	winnr = 1;
+	FOR_ALL_WINDOWS(wp)
+	{
+	    sprintf((char *)buf, ":%dresize %d|", winnr, wp->w_height);
+	    ga_concat(&ga, buf);
+	    sprintf((char *)buf, "vert :%dresize %d|", winnr, wp->w_width);
+	    ga_concat(&ga, buf);
+	    ++winnr;
+	}
     }
     ga_append(&ga, NUL);
 

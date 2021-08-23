@@ -189,49 +189,58 @@ func Test_confirm_cmd()
   CheckNotGui
   CheckRunVimInTerminal
 
-  call writefile(['foo1'], 'foo')
-  call writefile(['bar1'], 'bar')
+  call writefile(['foo1'], 'Xfoo')
+  call writefile(['bar1'], 'Xbar')
 
   " Test for saving all the modified buffers
-  let buf = RunVimInTerminal('', {'rows': 20})
-  call term_sendkeys(buf, ":set nomore\n")
-  call term_sendkeys(buf, ":new foo\n")
-  call term_sendkeys(buf, ":call setline(1, 'foo2')\n")
-  call term_sendkeys(buf, ":new bar\n")
-  call term_sendkeys(buf, ":call setline(1, 'bar2')\n")
-  call term_sendkeys(buf, ":wincmd b\n")
+  let lines =<< trim END
+    set nomore
+    new Xfoo
+    call setline(1, 'foo2')
+    new Xbar
+    call setline(1, 'bar2')
+    wincmd b
+  END
+  call writefile(lines, 'Xscript')
+  let buf = RunVimInTerminal('-S Xscript', {'rows': 20})
   call term_sendkeys(buf, ":confirm qall\n")
   call WaitForAssert({-> assert_match('\[Y\]es, (N)o, Save (A)ll, (D)iscard All, (C)ancel: ', term_getline(buf, 20))}, 1000)
   call term_sendkeys(buf, "A")
   call StopVimInTerminal(buf)
 
-  call assert_equal(['foo2'], readfile('foo'))
-  call assert_equal(['bar2'], readfile('bar'))
+  call assert_equal(['foo2'], readfile('Xfoo'))
+  call assert_equal(['bar2'], readfile('Xbar'))
 
   " Test for discarding all the changes to modified buffers
-  let buf = RunVimInTerminal('', {'rows': 20})
-  call term_sendkeys(buf, ":set nomore\n")
-  call term_sendkeys(buf, ":new foo\n")
-  call term_sendkeys(buf, ":call setline(1, 'foo3')\n")
-  call term_sendkeys(buf, ":new bar\n")
-  call term_sendkeys(buf, ":call setline(1, 'bar3')\n")
-  call term_sendkeys(buf, ":wincmd b\n")
+  let lines =<< trim END
+    set nomore
+    new Xfoo
+    call setline(1, 'foo3')
+    new Xbar
+    call setline(1, 'bar3')
+    wincmd b
+  END
+  call writefile(lines, 'Xscript')
+  let buf = RunVimInTerminal('-S Xscript', {'rows': 20})
   call term_sendkeys(buf, ":confirm qall\n")
   call WaitForAssert({-> assert_match('\[Y\]es, (N)o, Save (A)ll, (D)iscard All, (C)ancel: ', term_getline(buf, 20))}, 1000)
   call term_sendkeys(buf, "D")
   call StopVimInTerminal(buf)
 
-  call assert_equal(['foo2'], readfile('foo'))
-  call assert_equal(['bar2'], readfile('bar'))
+  call assert_equal(['foo2'], readfile('Xfoo'))
+  call assert_equal(['bar2'], readfile('Xbar'))
 
   " Test for saving and discarding changes to some buffers
-  let buf = RunVimInTerminal('', {'rows': 20})
-  call term_sendkeys(buf, ":set nomore\n")
-  call term_sendkeys(buf, ":new foo\n")
-  call term_sendkeys(buf, ":call setline(1, 'foo4')\n")
-  call term_sendkeys(buf, ":new bar\n")
-  call term_sendkeys(buf, ":call setline(1, 'bar4')\n")
-  call term_sendkeys(buf, ":wincmd b\n")
+  let lines =<< trim END
+    set nomore
+    new Xfoo
+    call setline(1, 'foo4')
+    new Xbar
+    call setline(1, 'bar4')
+    wincmd b
+  END
+  call writefile(lines, 'Xscript')
+  let buf = RunVimInTerminal('-S Xscript', {'rows': 20})
   call term_sendkeys(buf, ":confirm qall\n")
   call WaitForAssert({-> assert_match('\[Y\]es, (N)o, Save (A)ll, (D)iscard All, (C)ancel: ', term_getline(buf, 20))}, 1000)
   call term_sendkeys(buf, "N")
@@ -239,11 +248,12 @@ func Test_confirm_cmd()
   call term_sendkeys(buf, "Y")
   call StopVimInTerminal(buf)
 
-  call assert_equal(['foo4'], readfile('foo'))
-  call assert_equal(['bar2'], readfile('bar'))
+  call assert_equal(['foo4'], readfile('Xfoo'))
+  call assert_equal(['bar2'], readfile('Xbar'))
 
-  call delete('foo')
-  call delete('bar')
+  call delete('Xscript')
+  call delete('Xfoo')
+  call delete('Xbar')
 endfunc
 
 func Test_confirm_cmd_cancel()
@@ -251,10 +261,13 @@ func Test_confirm_cmd_cancel()
   CheckRunVimInTerminal
 
   " Test for closing a window with a modified buffer
-  let buf = RunVimInTerminal('', {'rows': 20})
-  call term_sendkeys(buf, ":set nomore\n")
-  call term_sendkeys(buf, ":new\n")
-  call term_sendkeys(buf, ":call setline(1, 'abc')\n")
+  let lines =<< trim END
+    set nomore
+    new
+    call setline(1, 'abc')
+  END
+  call writefile(lines, 'Xscript')
+  let buf = RunVimInTerminal('-S Xscript', {'rows': 20})
   call term_sendkeys(buf, ":confirm close\n")
   call WaitForAssert({-> assert_match('^\[Y\]es, (N)o, (C)ancel: *$',
         \ term_getline(buf, 20))}, 1000)
@@ -267,6 +280,43 @@ func Test_confirm_cmd_cancel()
   call WaitForAssert({-> assert_match('^ *0,0-1         All$',
         \ term_getline(buf, 20))}, 1000)
   call StopVimInTerminal(buf)
+  call delete('Xscript')
+endfunc
+
+" The ":confirm" prompt was sometimes used with the terminal in cooked mode.
+" This test verifies that a "\<CR>" character is NOT required to respond to a
+" prompt from the ":conf q" and ":conf wq" commands.
+func Test_confirm_q_wq()
+  CheckNotGui
+  CheckRunVimInTerminal
+
+  call writefile(['foo'], 'Xfoo')
+
+  let lines =<< trim END
+    set hidden nomore
+    call setline(1, 'abc')
+    edit Xfoo
+  END
+  call writefile(lines, 'Xscript')
+  let buf = RunVimInTerminal('-S Xscript', {'rows': 20})
+  call term_sendkeys(buf, ":confirm q\n")
+  call WaitForAssert({-> assert_match('^\[Y\]es, (N)o, (C)ancel: *$',
+        \ term_getline(buf, 20))}, 1000)
+  call term_sendkeys(buf, 'C')
+  call WaitForAssert({-> assert_notmatch('^\[Y\]es, (N)o, (C)ancel: C*$',
+        \ term_getline(buf, 20))}, 1000)
+
+  call term_sendkeys(buf, ":edit Xfoo\n")
+  call term_sendkeys(buf, ":confirm wq\n")
+  call WaitForAssert({-> assert_match('^\[Y\]es, (N)o, (C)ancel: *$',
+        \ term_getline(buf, 20))}, 1000)
+  call term_sendkeys(buf, 'C')
+  call WaitForAssert({-> assert_notmatch('^\[Y\]es, (N)o, (C)ancel: C*$',
+        \ term_getline(buf, 20))}, 1000)
+  call StopVimInTerminal(buf)
+
+  call delete('Xscript')
+  call delete('Xfoo')
 endfunc
 
 " Test for the :print command
@@ -277,16 +327,20 @@ endfunc
 " Test for the :winsize command
 func Test_winsize_cmd()
   call assert_fails('winsize 1', 'E465:')
+  call assert_fails('winsize 1 x', 'E465:')
+  call assert_fails('win_getid(1)', 'E475: Invalid argument: _getid(1)')
+  " Actually changing the window size would be flaky.
 endfunc
 
 " Test for the :redir command
+" NOTE: if you run tests as root this will fail.  Don't run tests as root!
 func Test_redir_cmd()
   call assert_fails('redir @@', 'E475:')
   call assert_fails('redir abc', 'E475:')
   call assert_fails('redir => 1abc', 'E474:')
   call assert_fails('redir => a b', 'E488:')
-  call assert_fails('redir => abc[1]', 'E474:')
-  let b=0zFF
+  call assert_fails('redir => abc[1]', 'E121:')
+  let b = 0zFF
   call assert_fails('redir =>> b', 'E734:')
   unlet b
 
@@ -295,13 +349,6 @@ func Test_redir_cmd()
     call mkdir('Xdir')
     call assert_fails('redir > Xdir', 'E17:')
     call delete('Xdir', 'd')
-  endif
-  if !has('bsd')
-    " Redirecting to a read-only file
-    call writefile([], 'Xfile')
-    call setfperm('Xfile', 'r--r--r--')
-    call assert_fails('redir! > Xfile', 'E190:')
-    call delete('Xfile')
   endif
 
   " Test for redirecting to a register
@@ -313,6 +360,16 @@ func Test_redir_cmd()
   redir => color | echon 'blue ' | redir END
   redir =>> color | echon 'sky' | redir END
   call assert_equal('blue sky', color)
+endfunc
+
+func Test_redir_cmd_readonly()
+  CheckNotRoot
+
+  " Redirecting to a read-only file
+  call writefile([], 'Xfile')
+  call setfperm('Xfile', 'r--r--r--')
+  call assert_fails('redir! > Xfile', 'E190:')
+  call delete('Xfile')
 endfunc
 
 " Test for the :filetype command
@@ -371,6 +428,11 @@ func Test_run_excmd_with_text_locked()
   close
 
   call assert_fails("call feedkeys(\":\<C-R>=execute('bnext')\<CR>\", 'xt')", 'E565:')
+
+  " :tabfirst
+  tabnew
+  call assert_fails("call feedkeys(\":\<C-R>=execute('tabfirst')\<CR>\", 'xt')", 'E565:')
+  tabclose
 endfunc
 
 " Test for the :verbose command

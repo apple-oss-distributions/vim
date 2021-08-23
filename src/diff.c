@@ -33,6 +33,7 @@ static int diff_need_update = FALSE; // ex_diffupdate needs to be called
 #define DIFF_VERTICAL	0x080	// vertical splits
 #define DIFF_HIDDEN_OFF	0x100	// diffoff when hidden
 #define DIFF_CLOSE_OFF	0x400	// diffoff when closing window
+#define DIFF_FOLLOWWRAP	0x800	// follow the wrap option
 #define ALL_WHITE_DIFF (DIFF_IWHITE | DIFF_IWHITEALL | DIFF_IWHITEEOL)
 static int	diff_flags = DIFF_FILLER | DIFF_CLOSE_OFF;
 
@@ -688,7 +689,7 @@ diff_write(buf_T *buf, diffin_T *din)
 {
     int		r;
     char_u	*save_ff;
-    int		save_lockmarks;
+    int		save_cmod_flags;
 
     if (din->din_fname == NULL)
 	return FAIL;
@@ -696,14 +697,14 @@ diff_write(buf_T *buf, diffin_T *din)
     // Always use 'fileformat' set to "unix".
     save_ff = buf->b_p_ff;
     buf->b_p_ff = vim_strsave((char_u *)FF_UNIX);
-    save_lockmarks = cmdmod.lockmarks;
+    save_cmod_flags = cmdmod.cmod_flags;
     // Writing the buffer is an implementation detail of performing the diff,
     // so it shouldn't update the '[ and '] marks.
-    cmdmod.lockmarks = TRUE;
+    cmdmod.cmod_flags |= CMOD_LOCKMARKS;
     r = buf_write(buf, din->din_fname, NULL,
 			(linenr_T)1, buf->b_ml.ml_line_count,
 			NULL, FALSE, FALSE, FALSE, TRUE);
-    cmdmod.lockmarks = save_lockmarks;
+    cmdmod.cmod_flags = save_cmod_flags;
     free_string_option(buf->b_p_ff);
     buf->b_p_ff = save_ff;
     return r;
@@ -1007,13 +1008,13 @@ ex_diffpatch(exarg_T *eap)
 #endif
 #ifdef FEAT_BROWSE
     char_u	*browseFile = NULL;
-    int		browse_flag = cmdmod.browse;
+    int		save_cmod_flags = cmdmod.cmod_flags;
 #endif
     stat_T	st;
     char_u	*esc_name = NULL;
 
 #ifdef FEAT_BROWSE
-    if (cmdmod.browse)
+    if (cmdmod.cmod_flags & CMOD_BROWSE)
     {
 	browseFile = do_browse(0, (char_u *)_("Patch file"),
 			 eap->arg, NULL, NULL,
@@ -1021,7 +1022,7 @@ ex_diffpatch(exarg_T *eap)
 	if (browseFile == NULL)
 	    return;		// operation cancelled
 	eap->arg = browseFile;
-	cmdmod.browse = FALSE;	// don't let do_ecmd() browse again
+	cmdmod.cmod_flags &= ~CMOD_BROWSE; // don't let do_ecmd() browse again
     }
 #endif
 
@@ -1121,7 +1122,7 @@ ex_diffpatch(exarg_T *eap)
 	if (curbuf->b_fname != NULL)
 	{
 	    newname = vim_strnsave(curbuf->b_fname,
-					  (int)(STRLEN(curbuf->b_fname) + 4));
+						  STRLEN(curbuf->b_fname) + 4);
 	    if (newname != NULL)
 		STRCAT(newname, ".new");
 	}
@@ -1130,7 +1131,7 @@ ex_diffpatch(exarg_T *eap)
 	need_mouse_correct = TRUE;
 #endif
 	// don't use a new tab page, each tab page has its own diffs
-	cmdmod.tab = 0;
+	cmdmod.cmod_tab = 0;
 
 	if (win_split(0, (diff_flags & DIFF_VERTICAL) ? WSP_VERT : 0) != FAIL)
 	{
@@ -1175,7 +1176,7 @@ theend:
     vim_free(esc_name);
 #ifdef FEAT_BROWSE
     vim_free(browseFile);
-    cmdmod.browse = browse_flag;
+    cmdmod.cmod_flags = save_cmod_flags;
 #endif
 }
 
@@ -1197,7 +1198,7 @@ ex_diffsplit(exarg_T *eap)
     set_fraction(curwin);
 
     // don't use a new tab page, each tab page has its own diffs
-    cmdmod.tab = 0;
+    cmdmod.cmod_tab = 0;
 
     if (win_split(0, (diff_flags & DIFF_VERTICAL) ? WSP_VERT : 0) != FAIL)
     {
@@ -1274,9 +1275,12 @@ diff_win_options(
     if (!wp->w_p_diff)
 	wp->w_p_crb_save = wp->w_p_crb;
     wp->w_p_crb = TRUE;
-    if (!wp->w_p_diff)
-	wp->w_p_wrap_save = wp->w_p_wrap;
-    wp->w_p_wrap = FALSE;
+    if (!(diff_flags & DIFF_FOLLOWWRAP))
+    {
+        if (!wp->w_p_diff)
+	    wp->w_p_wrap_save = wp->w_p_wrap;
+        wp->w_p_wrap = FALSE;
+    }
 # ifdef FEAT_FOLDING
     if (!wp->w_p_diff)
     {
@@ -1337,8 +1341,11 @@ ex_diffoff(exarg_T *eap)
 		    wp->w_p_scb = wp->w_p_scb_save;
 		if (wp->w_p_crb)
 		    wp->w_p_crb = wp->w_p_crb_save;
-		if (!wp->w_p_wrap)
-		    wp->w_p_wrap = wp->w_p_wrap_save;
+		if (!(diff_flags & DIFF_FOLLOWWRAP))
+		{
+		    if (!wp->w_p_wrap)
+		        wp->w_p_wrap = wp->w_p_wrap_save;
+		}
 #ifdef FEAT_FOLDING
 		free_string_option(wp->w_p_fdm);
 		wp->w_p_fdm = vim_strsave(
@@ -2065,6 +2072,11 @@ diffopt_changed(void)
 	    p += 8;
 	    diff_flags_new |= DIFF_CLOSE_OFF;
 	}
+	else if (STRNCMP(p, "followwrap", 10) == 0)
+	{
+	    p += 10;
+	    diff_flags_new |= DIFF_FOLLOWWRAP;
+	}
 	else if (STRNCMP(p, "algorithm:", 10) == 0)
 	{
 	    p += 10;
@@ -2090,7 +2102,7 @@ diffopt_changed(void)
 	return FAIL;
 
     // If flags were added or removed, or the algorithm was changed, need to
-    // update the diff.
+    // update the diff
     if (diff_flags != diff_flags_new || diff_algorithm != diff_algorithm_new)
 	FOR_ALL_TABPAGES(tp)
 	    tp->tp_diff_invalid = TRUE;
@@ -2559,7 +2571,7 @@ ex_diffgetput(exarg_T *eap)
 	    {
 		// remember deleting the last line of the buffer
 		buf_empty = curbuf->b_ml.ml_line_count == 1;
-		ml_delete(lnum, FALSE);
+		ml_delete(lnum);
 		--added;
 	    }
 	    for (i = 0; i < dp->df_count[idx_from] - start_skip - end_skip; ++i)
@@ -2581,7 +2593,7 @@ ex_diffgetput(exarg_T *eap)
 			// Added the first line into an empty buffer, need to
 			// delete the dummy empty line.
 			buf_empty = FALSE;
-			ml_delete((linenr_T)2, FALSE);
+			ml_delete((linenr_T)2);
 		    }
 		}
 	    }

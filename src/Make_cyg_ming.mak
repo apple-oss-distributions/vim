@@ -38,6 +38,9 @@ DEBUG=no
 # set to yes to create a mapfile
 #MAP=yes
 
+# set to yes to measure code coverage
+COVERAGE=no
+
 # set to SIZE for size, SPEED for speed, MAXSPEED for maximum optimization
 OPTIMIZE=MAXSPEED
 
@@ -217,7 +220,6 @@ WINDRES := $(CROSS_COMPILE)windres
 else
 WINDRES := windres
 endif
-WINDRES_CC = $(CC)
 
 # Get the default ARCH.
 ifndef ARCH
@@ -511,7 +513,8 @@ endif
 
 CFLAGS = -I. -Iproto $(DEFINES) -pipe -march=$(ARCH) -Wall
 CXXFLAGS = -std=gnu++11
-WINDRES_FLAGS = --preprocessor="$(WINDRES_CC) -E -xc" -DRC_INVOKED
+# This used to have --preprocessor, but it's no longer supported
+WINDRES_FLAGS =
 EXTRA_LIBS =
 
 ifdef GETTEXT
@@ -588,6 +591,8 @@ ifdef PYTHON3
 CFLAGS += -DFEAT_PYTHON3
  ifeq (yes, $(DYNAMIC_PYTHON3))
 CFLAGS += -DDYNAMIC_PYTHON3 -DDYNAMIC_PYTHON3_DLL=\"$(DYNAMIC_PYTHON3_DLL)\"
+ else
+CFLAGS += -DPYTHON3_DLL=\"$(DYNAMIC_PYTHON3_DLL)\"
  endif
 endif
 
@@ -625,7 +630,7 @@ endif
 
 ifeq ($(CHANNEL),yes)
 DEFINES += -DFEAT_JOB_CHANNEL -DFEAT_IPV6
- ifeq ($(shell expr "$(WINVER)" \>= 0x600),1)
+ ifeq ($(shell expr "$$(($(WINVER)))" \>= "$$((0x600))"),1)
 DEFINES += -DHAVE_INET_NTOP
  endif
 endif
@@ -698,6 +703,11 @@ CFLAGS += -O2
 LFLAGS += -s
 endif
 
+ifeq ($(COVERAGE),yes)
+CFLAGS += --coverage
+LFLAGS += --coverage
+endif
+
 LIB = -lkernel32 -luser32 -lgdi32 -ladvapi32 -lcomdlg32 -lcomctl32 -lnetapi32 -lversion
 GUIOBJ =  $(OUTDIR)/gui.o $(OUTDIR)/gui_w32.o $(OUTDIR)/gui_beval.o
 CUIOBJ = $(OUTDIR)/iscygpty.o
@@ -741,17 +751,21 @@ OBJ = \
 	$(OUTDIR)/findfile.o \
 	$(OUTDIR)/fold.o \
 	$(OUTDIR)/getchar.o \
+	$(OUTDIR)/gui_xim.o \
 	$(OUTDIR)/hardcopy.o \
 	$(OUTDIR)/hashtab.o \
+	$(OUTDIR)/help.o \
 	$(OUTDIR)/highlight.o \
 	$(OUTDIR)/if_cscope.o \
 	$(OUTDIR)/indent.o \
 	$(OUTDIR)/insexpand.o \
 	$(OUTDIR)/json.o \
 	$(OUTDIR)/list.o \
+	$(OUTDIR)/locale.o \
 	$(OUTDIR)/main.o \
 	$(OUTDIR)/map.o \
 	$(OUTDIR)/mark.o \
+	$(OUTDIR)/match.o \
 	$(OUTDIR)/memfile.o \
 	$(OUTDIR)/memline.o \
 	$(OUTDIR)/menu.o \
@@ -800,6 +814,7 @@ OBJ = \
 	$(OUTDIR)/vim9compile.o \
 	$(OUTDIR)/vim9execute.o \
 	$(OUTDIR)/vim9script.o \
+	$(OUTDIR)/vim9type.o \
 	$(OUTDIR)/viminfo.o \
 	$(OUTDIR)/winclip.o \
 	$(OUTDIR)/window.o
@@ -855,7 +870,7 @@ OBJ += $(OUTDIR)/netbeans.o
 endif
 
 ifeq ($(CHANNEL),yes)
-OBJ += $(OUTDIR)/channel.o
+OBJ += $(OUTDIR)/job.o $(OUTDIR)/channel.o
 LIB += -lwsock32 -lws2_32
 endif
 
@@ -912,6 +927,9 @@ LFLAGS += -shared
 EXELFLAGS += -municode
  ifneq ($(DEBUG),yes)
 EXELFLAGS += -s
+ endif
+ ifeq ($(COVERAGE),yes)
+EXELFLAGS += --coverage
  endif
 DEFINES += $(DEF_GUI) -DVIMDLL
 OBJ += $(GUIOBJ) $(CUIOBJ)
@@ -1019,17 +1037,23 @@ install.exe: dosinst.c dosinst.h version.h
 uninstall.exe: uninstall.c dosinst.h version.h
 	$(CC) $(CFLAGS) -o uninstall.exe uninstall.c $(LIB) -lole32
 
+$(OBJ): | $(OUTDIR)
+
+$(EXEOBJG): | $(OUTDIR)
+
+$(EXEOBJC): | $(OUTDIR)
+
 ifeq ($(VIMDLL),yes)
-$(TARGET): $(OUTDIR) $(OBJ)
+$(TARGET): $(OBJ)
 	$(LINK) $(CFLAGS) $(LFLAGS) -o $@ $(OBJ) $(LIB) -lole32 -luuid -lgdi32 $(LUA_LIB) $(MZSCHEME_LIBDIR) $(MZSCHEME_LIB) $(PYTHONLIB) $(PYTHON3LIB) $(RUBYLIB)
 
-$(GVIMEXE): $(OUTDIR) $(EXEOBJG) $(VIMDLLBASE).dll
+$(GVIMEXE): $(EXEOBJG) $(VIMDLLBASE).dll
 	$(CC) -L. $(EXELFLAGS) -mwindows -o $@ $(EXEOBJG) -l$(VIMDLLBASE)
 
-$(VIMEXE): $(OUTDIR) $(EXEOBJC) $(VIMDLLBASE).dll
+$(VIMEXE): $(EXEOBJC) $(VIMDLLBASE).dll
 	$(CC) -L. $(EXELFLAGS) -o $@ $(EXEOBJC) -l$(VIMDLLBASE)
 else
-$(TARGET): $(OUTDIR) $(OBJ)
+$(TARGET): $(OBJ)
 	$(LINK) $(CFLAGS) $(LFLAGS) -o $@ $(OBJ) $(LIB) -lole32 -luuid $(LUA_LIB) $(MZSCHEME_LIBDIR) $(MZSCHEME_LIB) $(PYTHONLIB) $(PYTHON3LIB) $(RUBYLIB)
 endif
 
@@ -1082,7 +1106,7 @@ cmdidxs: ex_cmds.h
 	vim --clean -X --not-a-term -u create_cmdidxs.vim
 
 ###########################################################################
-INCL =	vim.h alloc.h ascii.h ex_cmds.h feature.h globals.h \
+INCL =	vim.h alloc.h ascii.h ex_cmds.h feature.h errors.h globals.h \
 	keymap.h macros.h option.h os_dos.h os_win32.h proto.h regexp.h \
 	spell.h structs.h term.h beval.h $(NBDEBUG_INCL)
 GUI_INCL = gui.h
@@ -1152,6 +1176,8 @@ $(OUTDIR)/vim9compile.o: vim9compile.c $(INCL) version.h
 $(OUTDIR)/vim9execute.o: vim9execute.c $(INCL) version.h
 
 $(OUTDIR)/vim9script.o: vim9script.c $(INCL) version.h
+
+$(OUTDIR)/vim9type.o: vim9type.c $(INCL) version.h
 
 $(OUTDIR)/viminfo.o: viminfo.c $(INCL) version.h
 
@@ -1238,7 +1264,7 @@ $(OUTDIR)/vterm_%.o : libvterm/src/%.c $(TERM_DEPS)
 	$(CCCTERM) $< -o $@
 
 
-$(PATHDEF_SRC): Make_cyg_ming.mak Make_cyg.mak Make_ming.mak
+$(PATHDEF_SRC): Make_cyg_ming.mak Make_cyg.mak Make_ming.mak | $(OUTDIR)
 ifneq (sh.exe, $(SHELL))
 	@echo creating $(PATHDEF_SRC)
 	@echo '/* pathdef.c */' > $(PATHDEF_SRC)

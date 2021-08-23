@@ -1,5 +1,7 @@
 " Test for lambda and closure
 
+source check.vim
+
 func Test_lambda_feature()
   call assert_equal(1, has('lambda'))
 endfunc
@@ -19,9 +21,7 @@ func Test_lambda_with_sort()
 endfunc
 
 func Test_lambda_with_timer()
-  if !has('timers')
-    return
-  endif
+  CheckFeature timers
 
   let s:n = 0
   let s:timer_id = 0
@@ -247,6 +247,11 @@ func Test_closure_counter()
   call assert_equal(2, l:F())
   call assert_equal(3, l:F())
   call assert_equal(4, l:F())
+
+  call assert_match("^\n   function <SNR>\\d\\+_bar() closure"
+  \              .. "\n1        let x += 1"
+  \              .. "\n2        return x"
+  \              .. "\n   endfunction$", execute('func s:bar'))
 endfunc
 
 func Test_closure_unlet()
@@ -308,7 +313,7 @@ endfunc
 
 func Test_lambda_error()
   " This was causing a crash
-  call assert_fails('ec{@{->{d->()()', 'E15')
+  call assert_fails('ec{@{->{d->()()', 'E15:')
 endfunc
 
 func Test_closure_error()

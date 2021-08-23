@@ -150,10 +150,9 @@ func Test_mksession_large_winheight()
 endfunc
 
 func Test_mksession_rtp()
-  if has('win32')
-    " TODO: fix problem with backslashes
-    return
-  endif
+  " TODO: fix problem with backslashes on Win32
+  CheckNotMSWindows
+
   new
   let _rtp=&rtp
   " Make a real long (invalid) runtimepath value,
@@ -352,9 +351,8 @@ func Test_mksession_blank_windows()
   call delete('Xtest_mks.out')
 endfunc
 
-if has('terminal')
-
 func Test_mksession_terminal_shell()
+  CheckFeature terminal
   CheckFeature quickfix
 
   terminal
@@ -375,13 +373,15 @@ func Test_mksession_terminal_shell()
 endfunc
 
 func Test_mksession_terminal_no_restore_cmdarg()
+  CheckFeature terminal
+
   terminal ++norestore
   mksession! Xtest_mks.out
   let lines = readfile('Xtest_mks.out')
   let term_cmd = ''
   for line in lines
     if line =~ '^terminal'
-      call assert_report('session must not restore teminal')
+      call assert_report('session must not restore terminal')
     endif
   endfor
 
@@ -390,13 +390,15 @@ func Test_mksession_terminal_no_restore_cmdarg()
 endfunc
 
 func Test_mksession_terminal_no_restore_funcarg()
+  CheckFeature terminal
+
   call term_start(&shell, {'norestore': 1})
   mksession! Xtest_mks.out
   let lines = readfile('Xtest_mks.out')
   let term_cmd = ''
   for line in lines
     if line =~ '^terminal'
-      call assert_report('session must not restore teminal')
+      call assert_report('session must not restore terminal')
     endif
   endfor
 
@@ -405,6 +407,8 @@ func Test_mksession_terminal_no_restore_funcarg()
 endfunc
 
 func Test_mksession_terminal_no_restore_func()
+  CheckFeature terminal
+
   terminal
   call term_setrestore(bufnr('%'), 'NONE')
   mksession! Xtest_mks.out
@@ -412,7 +416,7 @@ func Test_mksession_terminal_no_restore_func()
   let term_cmd = ''
   for line in lines
     if line =~ '^terminal'
-      call assert_report('session must not restore teminal')
+      call assert_report('session must not restore terminal')
     endif
   endfor
 
@@ -421,6 +425,8 @@ func Test_mksession_terminal_no_restore_func()
 endfunc
 
 func Test_mksession_terminal_no_ssop()
+  CheckFeature terminal
+
   terminal
   set sessionoptions-=terminal
   mksession! Xtest_mks.out
@@ -428,7 +434,7 @@ func Test_mksession_terminal_no_ssop()
   let term_cmd = ''
   for line in lines
     if line =~ '^terminal'
-      call assert_report('session must not restore teminal')
+      call assert_report('session must not restore terminal')
     endif
   endfor
 
@@ -438,6 +444,7 @@ func Test_mksession_terminal_no_ssop()
 endfunc
 
 func Test_mksession_terminal_restore_other()
+  CheckFeature terminal
   CheckFeature quickfix
 
   terminal
@@ -456,7 +463,100 @@ func Test_mksession_terminal_restore_other()
   call delete('Xtest_mks.out')
 endfunc
 
-endif " has('terminal')
+func Test_mksession_terminal_shared_windows()
+  CheckFeature terminal
+
+  terminal
+  let term_buf = bufnr()
+  new
+  execute "buffer" term_buf
+  mksession! Xtest_mks.out
+
+  let lines = readfile('Xtest_mks.out')
+  let found_creation = 0
+  let found_use = 0
+
+  for line in lines
+    if line =~ '^terminal'
+      let found_creation = 1
+      call assert_match('terminal ++curwin ++cols=\d\+ ++rows=\d\+', line)
+    elseif line =~ "^execute 'buffer ' . s:term_buf_" . term_buf . "$"
+      let found_use = 1
+    endif
+  endfor
+
+  call assert_true(found_creation && found_use)
+
+  call StopShellInTerminal(term_buf)
+  call delete('Xtest_mks.out')
+endfunc
+
+func Test_mkview_terminal_windows()
+  CheckFeature terminal
+
+  " create two window on the same terminal to check this is handled OK
+  terminal
+  let term_buf = bufnr()
+  exe 'sbuf ' .. term_buf
+  mkview! Xtestview
+
+  call StopShellInTerminal(term_buf)
+  call delete('Xtestview')
+endfunc
+
+func Test_mkview_open_folds()
+  enew!
+
+  call append(0, ['a', 'b', 'c'])
+  1,3fold
+  " zR affects 'foldlevel', make sure the option is applied after the folds
+  " have been recreated.
+  normal zR
+  write! Xtestfile
+
+  call assert_equal(-1, foldclosed(1))
+  call assert_equal(-1, foldclosed(2))
+  call assert_equal(-1, foldclosed(3))
+
+  mkview! Xtestview
+  source Xtestview
+
+  call assert_equal(-1, foldclosed(1))
+  call assert_equal(-1, foldclosed(2))
+  call assert_equal(-1, foldclosed(3))
+
+  call delete('Xtestview')
+  call delete('Xtestfile')
+  %bwipe
+endfunc
+
+func Test_mkview_no_balt()
+  edit Xtestfile1
+  edit Xtestfile2
+
+  mkview! Xtestview
+  bdelete Xtestfile1
+
+  source Xtestview
+  call assert_equal(0, buflisted('Xtestfile1'))
+
+  call delete('Xtestview')
+  %bwipe
+endfunc
+
+func Test_mksession_no_balt()
+  edit Xtestfile1
+  edit Xtestfile2
+
+  bdelete Xtestfile1
+  mksession! Xtestview
+
+  source Xtestview
+  call assert_equal(0, buflisted('Xtestfile1'))
+
+  call delete('Xtestview')
+  %bwipe
+endfunc
 
 " Test :mkview with a file argument.
 func Test_mkview_file()
@@ -540,6 +640,53 @@ func Test_mkview_no_file_name()
   %bwipe
 endfunc
 
+func Test_mkview_loadview_jumplist()
+  set viewdir=Xviewdir
+  au BufWinLeave * silent mkview
+  au BufWinEnter * silent loadview
+
+  edit Xfile1
+  call setline(1, ['a', 'bbbbbbb', 'c'])
+  normal j3l
+  call assert_equal([2, 4], getcurpos()[1:2])
+  write
+
+  edit Xfile2
+  call setline(1, ['d', 'eeeeeee', 'f'])
+  normal j5l
+  call assert_equal([2, 6], getcurpos()[1:2])
+  write
+
+  edit Xfile3
+  call setline(1, ['g', 'h', 'iiiii'])
+  normal jj3l
+  call assert_equal([3, 4], getcurpos()[1:2])
+  write
+
+  edit Xfile1
+  call assert_equal([2, 4], getcurpos()[1:2])
+  edit Xfile2
+  call assert_equal([2, 6], getcurpos()[1:2])
+  edit Xfile3
+  call assert_equal([3, 4], getcurpos()[1:2])
+
+  exe "normal \<C-O>"
+  call assert_equal('Xfile2', expand('%'))
+  call assert_equal([2, 6], getcurpos()[1:2])
+  exe "normal \<C-O>"
+  call assert_equal('Xfile1', expand('%'))
+  call assert_equal([2, 4], getcurpos()[1:2])
+
+  au! BufWinLeave
+  au! BufWinEnter
+  bwipe!
+  call delete('Xviewdir', 'rf')
+  call delete('Xfile1')
+  call delete('Xfile2')
+  call delete('Xfile3')
+  set viewdir&
+endfunc
+
 " A clean session (one empty buffer, one window, and one tab) should not
 " set any error messages when sourced because no commands should fail.
 func Test_mksession_no_errmsg()
@@ -552,10 +699,9 @@ func Test_mksession_no_errmsg()
 endfunc
 
 func Test_mksession_quote_in_filename()
-  if !has('unix')
-    " only Unix can handle this weird filename
-    return
-  endif
+  " only Unix can handle this weird filename
+  CheckUnix
+
   let v:errmsg = ''
   %bwipe!
   split another
@@ -721,10 +867,9 @@ endfunc
 
 " Test for mksession with window position
 func Test_mksession_winpos()
-  if !has('gui_running')
-    " Only applicable in GUI Vim
-    return
-  endif
+  " Only applicable in GUI Vim
+  CheckGui
+
   set sessionoptions+=winpos
   mksession! Xtest_mks.out
   let found_winpos = v:false
@@ -813,6 +958,43 @@ func Test_mkvimrc()
 
   call s:ClearMappings()
   call delete('Xtestvimrc')
+endfunc
+
+func Test_scrolloff()
+  set sessionoptions+=localoptions
+  setlocal so=1 siso=1
+  mksession! Xtest_mks.out
+  setlocal so=-1 siso=-1
+  source Xtest_mks.out
+  call assert_equal(1, &l:so)
+  call assert_equal(1, &l:siso)
+  call delete('Xtest_mks.out')
+  setlocal so& siso&
+  set sessionoptions&
+endfunc
+
+func Test_altfile()
+  edit Xone
+  split Xtwo
+  edit Xtwoalt
+  edit #
+  wincmd w
+  edit Xonealt
+  edit #
+  mksession! Xtest_altfile
+  only
+  bwipe Xonealt
+  bwipe Xtwoalt
+  bwipe!
+  source Xtest_altfile
+  call assert_equal('Xone', bufname())
+  call assert_equal('Xonealt', bufname('#'))
+  wincmd w
+  call assert_equal('Xtwo', bufname())
+  call assert_equal('Xtwoalt', bufname('#'))
+  only
+  bwipe!
+  call delete('Xtest_altfile')
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

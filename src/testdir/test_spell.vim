@@ -77,6 +77,11 @@ func Test_spellbadword()
   call assert_equal(['bycycle', 'bad'],  spellbadword('My bycycle.'))
   call assert_equal(['another', 'caps'], 'A sentence. another sentence'->spellbadword())
 
+  call assert_equal(['TheCamelWord', 'bad'], 'TheCamelWord asdf'->spellbadword())
+  set spelloptions=camel
+  call assert_equal(['asdf', 'bad'], 'TheCamelWord asdf'->spellbadword())
+  set spelloptions=
+
   set spelllang=en
   call assert_equal(['', ''],            spellbadword('centre'))
   call assert_equal(['', ''],            spellbadword('center'))
@@ -99,16 +104,118 @@ foobar/?
    set spelllang=Xwords.spl
    call assert_equal(['foobar', 'rare'], spellbadword('foo foobar'))
 
-  " Typo should not be detected without the 'spell' option.
+  " Typo should be detected even without the 'spell' option.
   set spelllang=en_gb nospell
   call assert_equal(['', ''], spellbadword('centre'))
-  call assert_equal(['', ''], spellbadword('My bycycle.'))
-  call assert_equal(['', ''], spellbadword('A sentence. another sentence'))
+  call assert_equal(['bycycle', 'bad'], spellbadword('My bycycle.'))
+  call assert_equal(['another', 'caps'], spellbadword('A sentence. another sentence'))
+
+  set spelllang=
+  call assert_fails("call spellbadword('maxch')", 'E756:')
+  call assert_fails("spelldump", 'E756:')
 
   call delete('Xwords.spl')
   call delete('Xwords')
   set spelllang&
   set spell&
+endfunc
+
+func Test_spell_file_missing()
+  let s:spell_file_missing = 0
+  augroup TestSpellFileMissing
+    autocmd! SpellFileMissing * let s:spell_file_missing += 1
+  augroup END
+
+  set spell spelllang=ab_cd
+  let messages = GetMessages()
+  call assert_equal('Warning: Cannot find word list "ab.utf-8.spl" or "ab.ascii.spl"', messages[-1])
+  call assert_equal(1, s:spell_file_missing)
+
+  new XTestSpellFileMissing
+  augroup TestSpellFileMissing
+    autocmd! SpellFileMissing * bwipe
+  augroup END
+  call assert_fails('set spell spelllang=ab_cd', 'E797:')
+
+  augroup! TestSpellFileMissing
+  unlet s:spell_file_missing
+  set spell& spelllang&
+  %bwipe!
+endfunc
+
+func Test_spelldump()
+  set spell spelllang=en
+  spellrare! emacs
+
+  spelldump
+
+  " Check assumption about region: 1: us, 2: au, 3: ca, 4: gb, 5: nz.
+  call assert_equal('/regions=usaucagbnz', getline(1))
+  call assert_notequal(0, search('^theater/1$'))    " US English only.
+  call assert_notequal(0, search('^theatre/2345$')) " AU, CA, GB or NZ English.
+
+  call assert_notequal(0, search('^emacs/?$'))      " ? for a rare word.
+  call assert_notequal(0, search('^the the/!$'))    " ! for a wrong word.
+
+  bwipe
+  set spell&
+endfunc
+
+func Test_spelldump_bang()
+  new
+  call setline(1, 'This is a sample sentence.')
+  redraw
+  set spell
+  redraw
+  spelldump!
+
+  " :spelldump! includes the number of times a word was found while updating
+  " the screen.
+  " Common word count starts at 10, regular word count starts at 0.
+  call assert_notequal(0, search("^is\t11$"))    " common word found once.
+  call assert_notequal(0, search("^the\t10$"))   " common word never found.
+  call assert_notequal(0, search("^sample\t1$")) " regular word found once.
+  call assert_equal(0, search("^screen\t"))      " regular word never found.
+
+  %bwipe!
+  set spell&
+endfunc
+
+func Test_spelllang_inv_region()
+  set spell spelllang=en_xx
+  let messages = GetMessages()
+  call assert_equal('Warning: region xx not supported', messages[-1])
+  set spell& spelllang&
+endfunc
+
+func Test_compl_with_CTRL_X_CTRL_K_using_spell()
+  " When spell checking is enabled and 'dictionary' is empty,
+  " CTRL-X CTRL-K in insert mode completes using the spelling dictionary.
+  new
+  set spell spelllang=en dictionary=
+
+  set ignorecase
+  call feedkeys("Senglis\<c-x>\<c-k>\<esc>", 'tnx')
+  call assert_equal(['English'], getline(1, '$'))
+  call feedkeys("SEnglis\<c-x>\<c-k>\<esc>", 'tnx')
+  call assert_equal(['English'], getline(1, '$'))
+
+  set noignorecase
+  call feedkeys("Senglis\<c-x>\<c-k>\<esc>", 'tnx')
+  call assert_equal(['englis'], getline(1, '$'))
+  call feedkeys("SEnglis\<c-x>\<c-k>\<esc>", 'tnx')
+  call assert_equal(['English'], getline(1, '$'))
+
+  set spelllang=en_us
+  call feedkeys("Stheat\<c-x>\<c-k>\<esc>", 'tnx')
+  call assert_equal(['theater'], getline(1, '$'))
+  set spelllang=en_gb
+  call feedkeys("Stheat\<c-x>\<c-k>\<esc>", 'tnx')
+  " FIXME: commented out, expected theatre bug got theater. See issue #7025.
+  " call assert_equal(['theatre'], getline(1, '$'))
+
+  bwipe!
+  set spell& spelllang& dictionary& ignorecase&
 endfunc
 
 func Test_spellreall()
@@ -130,9 +237,9 @@ endfunc
 
 " Test spellsuggest({word} [, {max} [, {capital}]])
 func Test_spellsuggest()
-  " No suggestions when spell checking is not enabled.
+  " Verify suggestions are given even when spell checking is not enabled.
   set nospell
-  call assert_equal([], spellsuggest('marrch'))
+  call assert_equal(['march', 'March'], spellsuggest('marrch', 2))
 
   set spell
 
@@ -162,6 +269,10 @@ func Test_spellsuggest()
 
   call assert_fails("call spellsuggest('maxch', [])", 'E745:')
   call assert_fails("call spellsuggest('maxch', 2, [])", 'E745:')
+
+  set spelllang=
+  call assert_fails("call spellsuggest('maxch')", 'E756:')
+  set spelllang&
 
   set spell&
 endfunc
@@ -245,7 +356,7 @@ func Test_spellsuggest_option_number()
   \ .. "Change \"baord\" to:\n"
   \ .. " 1 \"board\"\n"
   \ .. " 2 \"bard\"\n"
-  \ .. "Type number and <Enter> or click with mouse (empty cancels): ", a)
+  \ .. "Type number and <Enter> or click with the mouse (q or empty cancels): ", a)
 
   set spell spellsuggest=0
   call assert_equal("\nSorry, no suggestions", execute('norm $z='))
@@ -283,7 +394,7 @@ func Test_spellsuggest_option_expr()
   \ .. " 1 \"BARD\"\n"
   \ .. " 2 \"BOARD\"\n"
   \ .. " 3 \"BROAD\"\n"
-  \ .. "Type number and <Enter> or click with mouse (empty cancels): ", a)
+  \ .. "Type number and <Enter> or click with the mouse (q or empty cancels): ", a)
 
   " With verbose, z= should show the score i.e. word length with
   " our SpellSuggest() function.
@@ -295,7 +406,7 @@ func Test_spellsuggest_option_expr()
   \ .. " 1 \"BARD\"                      (4 - 0)\n"
   \ .. " 2 \"BOARD\"                     (5 - 0)\n"
   \ .. " 3 \"BROAD\"                     (5 - 0)\n"
-  \ .. "Type number and <Enter> or click with mouse (empty cancels): ", a)
+  \ .. "Type number and <Enter> or click with the mouse (q or empty cancels): ", a)
 
   set spell& spellsuggest& verbose&
   bwipe!
@@ -322,7 +433,7 @@ func Test_spellsuggest_expr_errors()
     return [[{}, {}]]
   endfunc
   set spellsuggest=expr:MySuggest3()
-  call assert_fails("call spellsuggest('baord')", 'E728:')
+  call assert_fails("call spellsuggest('baord')", 'E731:')
 
   set nospell spellsuggest&
   delfunc MySuggest
@@ -614,6 +725,34 @@ func Test_zeq_crash()
   set maxmem=512 spell
   call feedkeys('iasdz=:\"', 'tx')
 
+  bwipe!
+endfunc
+
+" Check that z= works even when 'nospell' is set.  This test uses one of the
+" tests in Test_spellsuggest_option_number() just to verify that z= basically
+" works and that "E756: Spell checking is not enabled" is not generated.
+func Test_zeq_nospell()
+  new
+  set nospell spellsuggest=1,best
+  call setline(1, 'A baord')
+  try
+    norm $1z=
+    call assert_equal('A board', getline(1))
+  catch
+    call assert_report("Caught exception: " . v:exception)
+  endtry
+  set spell& spellsuggest&
+  bwipe!
+endfunc
+
+" Check that "E756: Spell checking is not possible" is reported when z= is
+" executed and 'spelllang' is empty.
+func Test_zeq_no_spelllang()
+  new
+  set spelllang= spellsuggest=1,best
+  call setline(1, 'A baord')
+  call assert_fails('normal $1z=', 'E756:')
+  set spelllang& spellsuggest&
   bwipe!
 endfunc
 

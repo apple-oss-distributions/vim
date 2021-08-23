@@ -1,4 +1,5 @@
 " Tests for the preview window
+
 source check.vim
 CheckFeature quickfix
 
@@ -25,6 +26,7 @@ func Test_window_preview()
   " Go to the preview window
   wincmd P
   call assert_equal(1, &previewwindow)
+  call assert_equal('preview', win_gettype())
 
   " Close preview window
   wincmd z

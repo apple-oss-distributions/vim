@@ -103,6 +103,24 @@ func MouseCtrlRightClick(row, col)
   call feedkeys(MouseCtrlRightClickCode(a:row, a:col), 'Lx!')
 endfunc
 
+func MouseAltLeftClickCode(row, col)
+  let alt = 0x8
+  return TerminalEscapeCode(0 + alt, a:row, a:col, 'M')
+endfunc
+
+func MouseAltLeftClick(row, col)
+  call feedkeys(MouseAltLeftClickCode(a:row, a:col), 'Lx!')
+endfunc
+
+func MouseAltRightClickCode(row, col)
+  let alt = 0x8
+  return TerminalEscapeCode(2 + alt, a:row, a:col, 'M')
+endfunc
+
+func MouseAltRightClick(row, col)
+  call feedkeys(MouseAltRightClickCode(a:row, a:col), 'Lx!')
+endfunc
+
 func MouseLeftReleaseCode(row, col)
   if &ttymouse ==# 'dec'
     return DecEscapeCode(3, 0, a:row, a:col)
@@ -167,6 +185,22 @@ endfunc
 
 func MouseWheelDown(row, col)
   call feedkeys(MouseWheelDownCode(a:row, a:col), 'Lx!')
+endfunc
+
+func MouseWheelLeftCode(row, col)
+  return TerminalEscapeCode(0x42, a:row, a:col, 'M')
+endfunc
+
+func MouseWheelLeft(row, col)
+  call feedkeys(MouseWheelLeftCode(a:row, a:col), 'Lx!')
+endfunc
+
+func MouseWheelRightCode(row, col)
+  return TerminalEscapeCode(0x43, a:row, a:col, 'M')
+endfunc
+
+func MouseWheelRight(row, col)
+  call feedkeys(MouseWheelRightCode(a:row, a:col), 'Lx!')
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab
