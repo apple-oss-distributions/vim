@@ -4,9 +4,11 @@ source check.vim
 CheckFeature conceal
 
 source screendump.vim
-CheckScreendump
+source view_util.vim
 
 func Test_conceal_two_windows()
+  CheckScreendump
+
   let code =<< trim [CODE]
     let lines = ["one one one one one", "two |hidden| here", "three |hidden| three"]
     call setline(1, lines)
@@ -111,6 +113,8 @@ func Test_conceal_two_windows()
 endfunc
 
 func Test_conceal_with_cursorline()
+  CheckScreendump
+
   " Opens a help window, where 'conceal' is set, switches to the other window
   " where 'cursorline' needs to be updated when the cursor moves.
   let code =<< trim [CODE]
@@ -138,6 +142,8 @@ func Test_conceal_with_cursorline()
 endfunc
 
 func Test_conceal_resize_term()
+  CheckScreendump
+
   let code =<< trim [CODE]
     call setline(1, '`one` `two` `three` `four` `five`, the backticks should be concealed')
     setl cocu=n cole=3
@@ -149,7 +155,6 @@ func Test_conceal_resize_term()
   call VerifyScreenDump(buf, 'Test_conceal_resize_01', {})
 
   call win_execute(buf->win_findbuf()[0], 'wincmd +')
-  call TermWait(buf)
   call VerifyScreenDump(buf, 'Test_conceal_resize_02', {})
 
   " clean up
@@ -276,6 +281,25 @@ func Test_conceal_eol()
   call assert_notequal(screenattr(1, 2), screenattr(2, 1))
 
   set nolist
+endfunc
+
+func Test_conceal_mouse_click()
+  enew!
+  set mouse=a
+  setlocal conceallevel=2 concealcursor=nc
+  syn match Concealed "this" conceal
+  hi link Concealed Search
+  call setline(1, 'conceal this click here')
+  redraw
+  call assert_equal(['conceal  click here '], ScreenLines(1, 20))
+
+  " click on 'h' of "here" puts cursor there
+  call test_setmouse(1, 16)
+  call feedkeys("\<LeftMouse>", "tx")
+  call assert_equal([0, 1, 20, 0, 20], getcurpos())
+
+  bwipe!
+  set mouse&
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -284,11 +284,11 @@ dictitem_free(dictitem_T *item)
 /*
  * Make a copy of dict "d".  Shallow if "deep" is FALSE.
  * The refcount of the new dict is set to 1.
- * See item_copy() for "copyID".
+ * See item_copy() for "top" and "copyID".
  * Returns NULL when out of memory.
  */
     dict_T *
-dict_copy(dict_T *orig, int deep, int copyID)
+dict_copy(dict_T *orig, int deep, int top, int copyID)
 {
     dict_T	*copy;
     dictitem_T	*di;
@@ -306,6 +306,11 @@ dict_copy(dict_T *orig, int deep, int copyID)
 	    orig->dv_copyID = copyID;
 	    orig->dv_copydict = copy;
 	}
+	if (orig->dv_type == NULL || top || deep)
+	    copy->dv_type = NULL;
+	else
+	    copy->dv_type = alloc_type(orig->dv_type);
+
 	todo = (int)orig->dv_hashtab.ht_used;
 	for (hi = orig->dv_hashtab.ht_array; todo > 0 && !got_int; ++hi)
 	{
@@ -318,8 +323,8 @@ dict_copy(dict_T *orig, int deep, int copyID)
 		    break;
 		if (deep)
 		{
-		    if (item_copy(&HI2DI(hi)->di_tv, &di->di_tv, deep,
-							      copyID) == FAIL)
+		    if (item_copy(&HI2DI(hi)->di_tv, &di->di_tv,
+						  deep, FALSE, copyID) == FAIL)
 		    {
 			vim_free(di);
 			break;
@@ -644,15 +649,24 @@ dict_find(dict_T *d, char_u *key, int len)
 }
 
 /*
+ * Returns TRUE if "key" is present in Dictionary "d".
+ */
+    int
+dict_has_key(dict_T *d, char *key)
+{
+    return dict_find(d, (char_u *)key, -1) != NULL;
+}
+
+/*
  * Get a typval_T item from a dictionary and copy it into "rettv".
  * Returns FAIL if the entry doesn't exist or out of memory.
  */
     int
-dict_get_tv(dict_T *d, char_u *key, typval_T *rettv)
+dict_get_tv(dict_T *d, char *key, typval_T *rettv)
 {
     dictitem_T	*di;
 
-    di = dict_find(d, key, -1);
+    di = dict_find(d, (char_u *)key, -1);
     if (di == NULL)
 	return FAIL;
     copy_tv(&di->di_tv, rettv);
@@ -666,12 +680,12 @@ dict_get_tv(dict_T *d, char_u *key, typval_T *rettv)
  * Returns NULL if the entry doesn't exist or out of memory.
  */
     char_u *
-dict_get_string(dict_T *d, char_u *key, int save)
+dict_get_string(dict_T *d, char *key, int save)
 {
     dictitem_T	*di;
     char_u	*s;
 
-    di = dict_find(d, key, -1);
+    di = dict_find(d, (char_u *)key, -1);
     if (di == NULL)
 	return NULL;
     s = tv_get_string(&di->di_tv);
@@ -685,7 +699,7 @@ dict_get_string(dict_T *d, char_u *key, int save)
  * Returns 0 if the entry doesn't exist.
  */
     varnumber_T
-dict_get_number(dict_T *d, char_u *key)
+dict_get_number(dict_T *d, char *key)
 {
     return dict_get_number_def(d, key, 0);
 }
@@ -695,11 +709,11 @@ dict_get_number(dict_T *d, char_u *key)
  * Returns "def" if the entry doesn't exist.
  */
     varnumber_T
-dict_get_number_def(dict_T *d, char_u *key, int def)
+dict_get_number_def(dict_T *d, char *key, int def)
 {
     dictitem_T	*di;
 
-    di = dict_find(d, key, -1);
+    di = dict_find(d, (char_u *)key, -1);
     if (di == NULL)
 	return def;
     return tv_get_number(&di->di_tv);
@@ -731,11 +745,11 @@ dict_get_number_check(dict_T *d, char_u *key)
  * Returns "def" if the entry doesn't exist.
  */
     varnumber_T
-dict_get_bool(dict_T *d, char_u *key, int def)
+dict_get_bool(dict_T *d, char *key, int def)
 {
     dictitem_T	*di;
 
-    di = dict_find(d, key, -1);
+    di = dict_find(d, (char_u *)key, -1);
     if (di == NULL)
 	return def;
     return tv_get_bool(&di->di_tv);
@@ -852,13 +866,13 @@ get_literal_key(char_u **arg)
 
     if (**arg == '\'')
     {
-	if (eval_lit_string(arg, &rettv, TRUE) == FAIL)
+	if (eval_lit_string(arg, &rettv, TRUE, FALSE) == FAIL)
 	    return NULL;
 	key = rettv.vval.v_string;
     }
     else if (**arg == '"')
     {
-	if (eval_string(arg, &rettv, TRUE) == FAIL)
+	if (eval_string(arg, &rettv, TRUE, FALSE) == FAIL)
 	    return NULL;
 	key = rettv.vval.v_string;
     }
@@ -1239,7 +1253,7 @@ dict_extend_func(
     {
 	if (is_new)
 	{
-	    d1 = dict_copy(d1, FALSE, get_copyID());
+	    d1 = dict_copy(d1, FALSE, TRUE, get_copyID());
 	    if (d1 == NULL)
 		return;
 	}
@@ -1443,6 +1457,9 @@ dict_list(typval_T *argvars, typval_T *rettv, int what)
     dict_T	*d;
     int		todo;
 
+    if (rettv_list_alloc(rettv) == FAIL)
+	return;
+
     if (in_vim9script() && check_for_dict_arg(argvars, 0) == FAIL)
 	return;
 
@@ -1452,8 +1469,6 @@ dict_list(typval_T *argvars, typval_T *rettv, int what)
 	return;
     }
 
-    if (rettv_list_alloc(rettv) == FAIL)
-	return;
     if ((d = argvars[0].vval.v_dict) == NULL)
 	// empty dict behaves like an empty dict
 	return;
@@ -1577,8 +1592,8 @@ f_has_key(typval_T *argvars, typval_T *rettv)
     if (argvars[0].vval.v_dict == NULL)
 	return;
 
-    rettv->vval.v_number = dict_find(argvars[0].vval.v_dict,
-				      tv_get_string(&argvars[1]), -1) != NULL;
+    rettv->vval.v_number = dict_has_key(argvars[0].vval.v_dict,
+				(char *)tv_get_string(&argvars[1]));
 }
 
 #endif // defined(FEAT_EVAL)

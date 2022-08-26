@@ -698,119 +698,61 @@ nfa_emit_equi_class(int c)
     if (enc_utf8 || STRCMP(p_enc, "latin1") == 0
 					 || STRCMP(p_enc, "iso-8859-15") == 0)
     {
-#ifdef EBCDIC
-# define A_circumflex 0x62
-# define A_diaeresis 0x63
-# define A_grave 0x64
-# define A_acute 0x65
-# define A_virguilla 0x66
-# define A_ring 0x67
-# define C_cedilla 0x68
-# define E_acute 0x71
-# define E_circumflex 0x72
-# define E_diaeresis 0x73
-# define E_grave 0x74
-# define I_acute 0x75
-# define I_circumflex 0x76
-# define I_diaeresis 0x77
-# define I_grave 0x78
-# define N_virguilla 0x69
-# define O_circumflex 0xeb
-# define O_diaeresis 0xec
-# define O_grave 0xed
-# define O_acute 0xee
-# define O_virguilla 0xef
-# define O_slash 0x80
-# define U_circumflex 0xfb
-# define U_diaeresis 0xfc
-# define U_grave 0xfd
-# define U_acute 0xfe
-# define Y_acute 0xba
-# define a_grave 0x42
-# define a_acute 0x43
-# define a_circumflex 0x44
-# define a_virguilla 0x45
-# define a_diaeresis 0x46
-# define a_ring 0x47
-# define c_cedilla 0x48
-# define e_grave 0x51
-# define e_acute 0x52
-# define e_circumflex 0x53
-# define e_diaeresis 0x54
-# define i_grave 0x55
-# define i_acute 0x56
-# define i_circumflex 0x57
-# define i_diaeresis 0x58
-# define n_virguilla 0x49
-# define o_grave 0xcb
-# define o_acute 0xcc
-# define o_circumflex 0xcd
-# define o_virguilla 0xce
-# define o_diaeresis 0xcf
-# define o_slash 0x70
-# define u_grave 0xdb
-# define u_acute 0xdc
-# define u_circumflex 0xdd
-# define u_diaeresis 0xde
-# define y_acute 0x8d
-# define y_diaeresis 0xdf
-#else
-# define A_grave 0xc0
-# define A_acute 0xc1
-# define A_circumflex 0xc2
-# define A_virguilla 0xc3
-# define A_diaeresis 0xc4
-# define A_ring 0xc5
-# define C_cedilla 0xc7
-# define E_grave 0xc8
-# define E_acute 0xc9
-# define E_circumflex 0xca
-# define E_diaeresis 0xcb
-# define I_grave 0xcc
-# define I_acute 0xcd
-# define I_circumflex 0xce
-# define I_diaeresis 0xcf
-# define N_virguilla 0xd1
-# define O_grave 0xd2
-# define O_acute 0xd3
-# define O_circumflex 0xd4
-# define O_virguilla 0xd5
-# define O_diaeresis 0xd6
-# define O_slash 0xd8
-# define U_grave 0xd9
-# define U_acute 0xda
-# define U_circumflex 0xdb
-# define U_diaeresis 0xdc
-# define Y_acute 0xdd
-# define a_grave 0xe0
-# define a_acute 0xe1
-# define a_circumflex 0xe2
-# define a_virguilla 0xe3
-# define a_diaeresis 0xe4
-# define a_ring 0xe5
-# define c_cedilla 0xe7
-# define e_grave 0xe8
-# define e_acute 0xe9
-# define e_circumflex 0xea
-# define e_diaeresis 0xeb
-# define i_grave 0xec
-# define i_acute 0xed
-# define i_circumflex 0xee
-# define i_diaeresis 0xef
-# define n_virguilla 0xf1
-# define o_grave 0xf2
-# define o_acute 0xf3
-# define o_circumflex 0xf4
-# define o_virguilla 0xf5
-# define o_diaeresis 0xf6
-# define o_slash 0xf8
-# define u_grave 0xf9
-# define u_acute 0xfa
-# define u_circumflex 0xfb
-# define u_diaeresis 0xfc
-# define y_acute 0xfd
-# define y_diaeresis 0xff
-#endif
+#define A_grave 0xc0
+#define A_acute 0xc1
+#define A_circumflex 0xc2
+#define A_virguilla 0xc3
+#define A_diaeresis 0xc4
+#define A_ring 0xc5
+#define C_cedilla 0xc7
+#define E_grave 0xc8
+#define E_acute 0xc9
+#define E_circumflex 0xca
+#define E_diaeresis 0xcb
+#define I_grave 0xcc
+#define I_acute 0xcd
+#define I_circumflex 0xce
+#define I_diaeresis 0xcf
+#define N_virguilla 0xd1
+#define O_grave 0xd2
+#define O_acute 0xd3
+#define O_circumflex 0xd4
+#define O_virguilla 0xd5
+#define O_diaeresis 0xd6
+#define O_slash 0xd8
+#define U_grave 0xd9
+#define U_acute 0xda
+#define U_circumflex 0xdb
+#define U_diaeresis 0xdc
+#define Y_acute 0xdd
+#define a_grave 0xe0
+#define a_acute 0xe1
+#define a_circumflex 0xe2
+#define a_virguilla 0xe3
+#define a_diaeresis 0xe4
+#define a_ring 0xe5
+#define c_cedilla 0xe7
+#define e_grave 0xe8
+#define e_acute 0xe9
+#define e_circumflex 0xea
+#define e_diaeresis 0xeb
+#define i_grave 0xec
+#define i_acute 0xed
+#define i_circumflex 0xee
+#define i_diaeresis 0xef
+#define n_virguilla 0xf1
+#define o_grave 0xf2
+#define o_acute 0xf3
+#define o_circumflex 0xf4
+#define o_virguilla 0xf5
+#define o_diaeresis 0xf6
+#define o_slash 0xf8
+#define u_grave 0xf9
+#define u_acute 0xfa
+#define u_circumflex 0xfb
+#define u_diaeresis 0xfc
+#define y_acute 0xfd
+#define y_diaeresis 0xff
 	switch (c)
 	{
 	    case 'A': case A_grave: case A_acute: case A_circumflex:
@@ -1327,7 +1269,6 @@ nfa_emit_equi_class(int c)
     EMIT2(c);
     return OK;
 #undef EMIT2
-#undef EMIT2
 }
 
 /*
@@ -1651,6 +1592,14 @@ nfa_regatom(void)
 		    break;
 
 		case '#':
+		    if (regparse[0] == '=' && regparse[1] >= 48
+							  && regparse[1] <= 50)
+		    {
+			// misplaced \%#=1
+			semsg(_(e_atom_engine_must_be_at_start_of_pattern),
+								  regparse[1]);
+			return FAIL;
+		    }
 		    EMIT(NFA_CURSOR);
 		    break;
 
@@ -1699,6 +1648,7 @@ nfa_regatom(void)
 			long_u	n = 0;
 			int	cmp = c;
 			int	cur = FALSE;
+			int	got_digit = FALSE;
 
 			if (c == '<' || c == '>')
 			    c = getchr();
@@ -1712,8 +1662,11 @@ nfa_regatom(void)
 			    long_u tmp;
 
 			    if (cur)
-				semsg(_(e_regexp_number_after_dot_pos_search),
-								 no_Magic(c));
+			    {
+				semsg(_(e_regexp_number_after_dot_pos_search_chr),
+								  no_Magic(c));
+				return FAIL;
+			    }
 			    tmp = n * 10 + (c - '0');
 
 			    if (tmp < n)
@@ -1724,11 +1677,18 @@ nfa_regatom(void)
 			    }
 			    n = tmp;
 			    c = getchr();
+			    got_digit = TRUE;
 			}
 			if (c == 'l' || c == 'c' || c == 'v')
 			{
 			    long_u limit = INT_MAX;
 
+			    if (!cur && !got_digit)
+			    {
+				semsg(_(e_nfa_regexp_missing_value_in_chr),
+								  no_Magic(c));
+				return FAIL;
+			    }
 			    if (c == 'l')
 			    {
 				if (cur)
@@ -2041,24 +2001,13 @@ collection:
 			}
 			else
 			{
-#ifdef EBCDIC
-			    int alpha_only = FALSE;
-
-			    // for alphabetical range skip the gaps
-			    // 'i'-'j', 'r'-'s', 'I'-'J' and 'R'-'S'.
-			    if (isalpha(startc) && isalpha(endc))
-				alpha_only = TRUE;
-#endif
 			    // Emit the range. "startc" was already emitted, so
 			    // skip it.
 			    for (c = startc + 1; c <= endc; c++)
-#ifdef EBCDIC
-				if (!alpha_only || isalpha(startc))
-#endif
-				{
-				    EMIT(c);
-				    EMIT(NFA_CONCAT);
-				}
+			    {
+				EMIT(c);
+				EMIT(NFA_CONCAT);
+			    }
 			}
 			emit_range = FALSE;
 			startc = -1;
@@ -4102,9 +4051,7 @@ pim_info(nfa_pim_T *pim)
 // Used during execution: whether a match has been found.
 static int	    nfa_match;
 #ifdef FEAT_RELTIME
-static proftime_T  *nfa_time_limit;
 static int	   *nfa_timed_out;
-static int	    nfa_time_count;
 #endif
 
 static void copy_sub(regsub_T *to, regsub_T *from);
@@ -4289,6 +4236,29 @@ sub_equal(regsub_T *sub1, regsub_T *sub2)
 
     return TRUE;
 }
+
+#ifdef FEAT_RELTIME
+/*
+ * Check if we are past the time limit, if there is one.
+ */
+    static int
+nfa_did_time_out(void)
+{
+    if (*timeout_flag)
+    {
+	if (nfa_timed_out != NULL)
+	{
+# ifdef FEAT_JOB_CHANNEL
+	    if (!*nfa_timed_out)
+		ch_log(NULL, "NFA regexp timed out");
+# endif
+	    *nfa_timed_out = TRUE;
+	}
+	return TRUE;
+    }
+    return FALSE;
+}
+#endif
 
 #ifdef ENABLE_LOG
     static void
@@ -4504,7 +4474,7 @@ state_in_list(
 /*
  * Add "state" and possibly what follows to state list ".".
  * Returns "subs_arg", possibly copied into temp_subs.
- * Returns NULL when recursiveness is too deep.
+ * Returns NULL when recursiveness is too deep or timed out.
  */
     static regsubs_T *
 addstate(
@@ -4532,6 +4502,11 @@ addstate(
     int			did_print = FALSE;
 #endif
     static int		depth = 0;
+
+#ifdef FEAT_RELTIME
+    if (nfa_did_time_out())
+	return NULL;
+#endif
 
     // This function is called recursively.  When the depth is too much we run
     // out of stack and crash, limit recursiveness here.
@@ -5696,20 +5671,6 @@ find_match_text(colnr_T startcol, int regstart, char_u *match_text)
     return 0L;
 }
 
-#ifdef FEAT_RELTIME
-    static int
-nfa_did_time_out()
-{
-    if (nfa_time_limit != NULL && profile_passed_limit(nfa_time_limit))
-    {
-	if (nfa_timed_out != NULL)
-	    *nfa_timed_out = TRUE;
-	return TRUE;
-    }
-    return FALSE;
-}
-#endif
-
 /*
  * Main matching routine.
  *
@@ -5911,12 +5872,8 @@ nfa_regmatch(
 	    if (got_int)
 		break;
 #ifdef FEAT_RELTIME
-	    if (nfa_time_limit != NULL && ++nfa_time_count == 20)
-	    {
-		nfa_time_count = 0;
-		if (nfa_did_time_out())
-		    break;
-	    }
+	    if (nfa_did_time_out())
+		break;
 #endif
 	    t = &thislist->t[listidx];
 
@@ -6817,8 +6774,16 @@ nfa_regmatch(
 			result = col > t->state->val * ts;
 		    }
 		    if (!result)
-			result = nfa_re_num_cmp(t->state->val, op,
-				(long_u)win_linetabsize(wp, rex.line, col) + 1);
+		    {
+			linenr_T    lnum = rex.reg_firstlnum + rex.lnum;
+			long_u	    vcol = 0;
+
+			if (lnum > 0
+				   && lnum <= wp->w_buffer->b_ml.ml_line_count)
+			    vcol = (long_u)win_linetabsize(wp, lnum,
+								rex.line, col);
+			result = nfa_re_num_cmp(t->state->val, op, vcol + 1);
+		    }
 		    if (result)
 		    {
 			add_here = TRUE;
@@ -6831,8 +6796,10 @@ nfa_regmatch(
 	    case NFA_MARK_GT:
 	    case NFA_MARK_LT:
 	      {
-		size_t	col = rex.input - rex.line;
-		pos_T	*pos = getmark_buf(rex.reg_buf, t->state->val, FALSE);
+		pos_T	*pos;
+		size_t	col = REG_MULTI ? rex.input - rex.line : 0;
+
+		pos = getmark_buf(rex.reg_buf, t->state->val, FALSE);
 
 		// Line may have been freed, get it again.
 		if (REG_MULTI)
@@ -7159,13 +7126,8 @@ nextchar:
 	if (got_int)
 	    break;
 #ifdef FEAT_RELTIME
-	// Check for timeout once in a twenty times to avoid overhead.
-	if (nfa_time_limit != NULL && ++nfa_time_count == 20)
-	{
-	    nfa_time_count = 0;
-	    if (nfa_did_time_out())
-		break;
-	}
+	if (nfa_did_time_out())
+	    break;
 #endif
     }
 
@@ -7196,7 +7158,6 @@ theend:
 nfa_regtry(
     nfa_regprog_T   *prog,
     colnr_T	    col,
-    proftime_T	    *tm UNUSED,	// timeout limit or NULL
     int		    *timed_out UNUSED)	// flag set on timeout or NULL
 {
     int		i;
@@ -7209,9 +7170,7 @@ nfa_regtry(
 
     rex.input = rex.line + col;
 #ifdef FEAT_RELTIME
-    nfa_time_limit = tm;
     nfa_timed_out = timed_out;
-    nfa_time_count = 0;
 #endif
 
 #ifdef ENABLE_LOG
@@ -7338,7 +7297,6 @@ nfa_regtry(
 nfa_regexec_both(
     char_u	*line,
     colnr_T	startcol,	// column to start looking for match
-    proftime_T	*tm,		// timeout limit or NULL
     int		*timed_out)	// flag set on timeout or NULL
 {
     nfa_regprog_T   *prog;
@@ -7434,7 +7392,7 @@ nfa_regexec_both(
 	prog->state[i].lastlist[1] = 0;
     }
 
-    retval = nfa_regtry(prog, col, tm, timed_out);
+    retval = nfa_regtry(prog, col, timed_out);
 
 #ifdef DEBUG
     nfa_regengine.expr = NULL;
@@ -7614,7 +7572,7 @@ nfa_regexec_nl(
     rex.reg_ic = rmp->rm_ic;
     rex.reg_icombine = FALSE;
     rex.reg_maxcol = 0;
-    return nfa_regexec_both(line, col, NULL, NULL);
+    return nfa_regexec_both(line, col, NULL);
 }
 
 
@@ -7650,11 +7608,10 @@ nfa_regexec_multi(
     buf_T	*buf,		// buffer in which to search
     linenr_T	lnum,		// nr of line to start looking for match
     colnr_T	col,		// column to start looking for match
-    proftime_T	*tm,		// timeout limit or NULL
     int		*timed_out)	// flag set on timeout or NULL
 {
     init_regexec_multi(rmp, win, buf, lnum);
-    return nfa_regexec_both(NULL, col, tm, timed_out);
+    return nfa_regexec_both(NULL, col, timed_out);
 }
 
 #ifdef DEBUG

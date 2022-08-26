@@ -175,7 +175,6 @@ func Test_scroll_CursorLineNr_update()
   call writefile(lines, filename)
   let buf = RunVimInTerminal('-S '.filename, #{rows: 5, cols: 50})
   call term_sendkeys(buf, "k")
-  call TermWait(buf)
   call VerifyScreenDump(buf, 'Test_winline_rnu', {})
 
   " clean up
@@ -257,6 +256,27 @@ func Test_display_scroll_at_topline()
   call StopVimInTerminal(buf)
 endfunc
 
+func Test_display_scroll_update_visual()
+  CheckScreendump
+
+  let lines =<< trim END
+      set scrolloff=0
+      call setline(1, repeat(['foo'], 10))
+      call sign_define('foo', { 'text': '>' })
+      call sign_place(1, 'bar', 'foo', bufnr(), { 'lnum': 2 })
+      call sign_place(2, 'bar', 'foo', bufnr(), { 'lnum': 1 })
+      autocmd CursorMoved * if getcurpos()[1] == 2 | call sign_unplace('bar', { 'id': 1 }) | endif
+  END
+  call writefile(lines, 'XupdateVisual.vim')
+
+  let buf = RunVimInTerminal('-S XupdateVisual.vim', #{rows: 8, cols: 60})
+  call term_sendkeys(buf, "VG7kk")
+  call VerifyScreenDump(buf, 'Test_display_scroll_update_visual', {})
+
+  call StopVimInTerminal(buf)
+  call delete('XupdateVisual.vim')
+endfunc
+
 " Test for 'eob' (EndOfBuffer) item in 'fillchars'
 func Test_eob_fillchars()
   " default value
@@ -336,6 +356,34 @@ func Test_fold_fillchars()
   set fillchars& fdc& foldmethod& foldenable&
 endfunc
 
+func Test_local_fillchars()
+  CheckScreendump
+
+  let lines =<< trim END
+      call setline(1, ['window 1']->repeat(3))
+      setlocal fillchars=stl:1,stlnc:a,vert:=,eob:x
+      vnew
+      call setline(1, ['window 2']->repeat(3))
+      setlocal fillchars=stl:2,stlnc:b,vert:+,eob:y
+      new
+      wincmd J
+      call setline(1, ['window 3']->repeat(3))
+      setlocal fillchars=stl:3,stlnc:c,vert:<,eob:z
+      vnew
+      call setline(1, ['window 4']->repeat(3))
+      setlocal fillchars=stl:4,stlnc:d,vert:>,eob:o
+  END
+  call writefile(lines, 'Xdisplayfillchars')
+  let buf = RunVimInTerminal('-S Xdisplayfillchars', #{rows: 12})
+  call VerifyScreenDump(buf, 'Test_display_fillchars_1', {})
+
+  call term_sendkeys(buf, ":wincmd k\r")
+  call VerifyScreenDump(buf, 'Test_display_fillchars_2', {})
+
+  call StopVimInTerminal(buf)
+  call delete('Xdisplayfillchars')
+endfunc
+
 func Test_display_linebreak_breakat()
   new
   vert resize 25
@@ -350,6 +398,32 @@ func Test_display_linebreak_breakat()
   call assert_equal(expected, lines)
   %bw!
   let &breakat=_breakat
+endfunc
+
+func Test_display_lastline()
+  CheckScreendump
+
+  let lines =<< trim END
+      call setline(1, ['aaa', 'b'->repeat(100)])
+      set display=truncate
+      vsplit
+      100wincmd <
+  END
+  call writefile(lines, 'XdispLastline')
+  let buf = RunVimInTerminal('-S XdispLastline', #{rows: 10})
+  call VerifyScreenDump(buf, 'Test_display_lastline_1', {})
+
+  call term_sendkeys(buf, ":set display=lastline\<CR>")
+  call VerifyScreenDump(buf, 'Test_display_lastline_2', {})
+
+  call term_sendkeys(buf, ":100wincmd >\<CR>")
+  call VerifyScreenDump(buf, 'Test_display_lastline_3', {})
+
+  call term_sendkeys(buf, ":set display=truncate\<CR>")
+  call VerifyScreenDump(buf, 'Test_display_lastline_4', {})
+
+  call StopVimInTerminal(buf)
+  call delete('XdispLastline')
 endfunc
 
 

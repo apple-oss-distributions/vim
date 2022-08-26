@@ -13,6 +13,25 @@
 
 #include "vim.h"
 
+/*
+ * Horiziontal and vertical steps used when scrolling.
+ * When negative scroll by a whole page.
+ */
+static long mouse_hor_step = 6;
+static long mouse_vert_step = 3;
+
+    void
+mouse_set_vert_scroll_step(long step)
+{
+    mouse_vert_step = step;
+}
+
+    void
+mouse_set_hor_scroll_step(long step)
+{
+    mouse_hor_step = step;
+}
+
 #ifdef CHECK_DOUBLE_CLICK
 /*
  * Return the duration from t1 to t2 in milliseconds.
@@ -115,7 +134,7 @@ find_end_of_word(pos_T *pos)
 }
 
 #if defined(FEAT_GUI_MOTIF) || defined(FEAT_GUI_GTK) \
-	    || defined(FEAT_GUI_ATHENA) || defined(FEAT_GUI_MSWIN) \
+	    || defined(FEAT_GUI_MSWIN) \
 	    || defined(FEAT_GUI_PHOTON) \
 	    || defined(FEAT_TERM_POPUP_MENU)
 # define USE_POPUP_SETPOS
@@ -250,7 +269,7 @@ do_mouse(
 		if (!mouse_has(MOUSE_VISUAL))
 		    return FALSE;
 	    }
-	    else if (State == NORMAL && !mouse_has(MOUSE_NORMAL))
+	    else if (State == MODE_NORMAL && !mouse_has(MOUSE_NORMAL))
 		return FALSE;
 	}
 
@@ -261,7 +280,10 @@ do_mouse(
 	{
 	    // If the next character is the same mouse event then use that
 	    // one. Speeds up dragging the status line.
-	    if (vpeekc() != NUL)
+	    // Note: Since characters added to the stuff buffer in the code
+	    // below need to come before the next character, do not do this
+	    // when the current character was stuffed.
+	    if (!KeyStuffed && vpeekc() != NUL)
 	    {
 		int nc;
 		int save_mouse_row = mouse_row;
@@ -333,7 +355,7 @@ do_mouse(
     // CTRL right mouse button does CTRL-T
     if (is_click && (mod_mask & MOD_MASK_CTRL) && which_button == MOUSE_RIGHT)
     {
-	if (State & INSERT)
+	if (State & MODE_INSERT)
 	    stuffcharReadbuff(Ctrl_O);
 	if (count > 1)
 	    stuffnumReadbuff(count);
@@ -377,7 +399,7 @@ do_mouse(
     // Middle mouse button does a 'put' of the selected text
     if (which_button == MOUSE_MIDDLE)
     {
-	if (State == NORMAL)
+	if (State == MODE_NORMAL)
 	{
 	    // If an operator was pending, we don't know what the user wanted
 	    // to do. Go back to normal mode: Clear the operator and beep().
@@ -408,7 +430,7 @@ do_mouse(
 	    // The rest is below jump_to_mouse()
 	}
 
-	else if ((State & INSERT) == 0)
+	else if ((State & MODE_INSERT) == 0)
 	    return FALSE;
 
 	// Middle click in insert mode doesn't move the mouse, just insert the
@@ -416,7 +438,7 @@ do_mouse(
 	// with do_put().
 	// Also paste at the cursor if the current mode isn't in 'mouse' (only
 	// happens for the GUI).
-	if ((State & INSERT) || !mouse_has(MOUSE_NORMAL))
+	if ((State & MODE_INSERT) || !mouse_has(MOUSE_NORMAL))
 	{
 	    if (regname == '.')
 		insert_reg(regname, TRUE);
@@ -449,74 +471,77 @@ do_mouse(
 
     start_visual.lnum = 0;
 
-    // Check for clicking in the tab page line.
-    if (mouse_row == 0 && firstwin->w_winrow > 0)
+    if (TabPageIdxs != NULL)  // only when initialized
     {
-	if (is_drag)
+	// Check for clicking in the tab page line.
+	if (mouse_row == 0 && firstwin->w_winrow > 0)
 	{
-	    if (in_tab_line)
+	    if (is_drag)
 	    {
-		c1 = TabPageIdxs[mouse_col];
-		tabpage_move(c1 <= 0 ? 9999 : c1 < tabpage_index(curtab)
-								? c1 - 1 : c1);
+		if (in_tab_line)
+		{
+		    c1 = TabPageIdxs[mouse_col];
+		    tabpage_move(c1 <= 0 ? 9999 : c1 < tabpage_index(curtab)
+								    ? c1 - 1 : c1);
+		}
+		return FALSE;
 	    }
+
+	    // click in a tab selects that tab page
+	    if (is_click
+# ifdef FEAT_CMDWIN
+		    && cmdwin_type == 0
+# endif
+		    && mouse_col < Columns)
+	    {
+		in_tab_line = TRUE;
+		c1 = TabPageIdxs[mouse_col];
+		if (c1 >= 0)
+		{
+		    if ((mod_mask & MOD_MASK_MULTI_CLICK) == MOD_MASK_2CLICK)
+		    {
+			// double click opens new page
+			end_visual_mode_keep_button();
+			tabpage_new();
+			tabpage_move(c1 == 0 ? 9999 : c1 - 1);
+		    }
+		    else
+		    {
+			// Go to specified tab page, or next one if not clicking
+			// on a label.
+			goto_tabpage(c1);
+
+			// It's like clicking on the status line of a window.
+			if (curwin != old_curwin)
+			    end_visual_mode_keep_button();
+		    }
+		}
+		else
+		{
+		    tabpage_T	*tp;
+
+		    // Close the current or specified tab page.
+		    if (c1 == -999)
+			tp = curtab;
+		    else
+			tp = find_tabpage(-c1);
+		    if (tp == curtab)
+		    {
+			if (first_tabpage->tp_next != NULL)
+			    tabpage_close(FALSE);
+		    }
+		    else if (tp != NULL)
+			tabpage_close_other(tp, FALSE);
+		}
+	    }
+	    return TRUE;
+	}
+	else if (is_drag && in_tab_line)
+	{
+	    c1 = TabPageIdxs[mouse_col];
+	    tabpage_move(c1 <= 0 ? 9999 : c1 - 1);
 	    return FALSE;
 	}
-
-	// click in a tab selects that tab page
-	if (is_click
-# ifdef FEAT_CMDWIN
-		&& cmdwin_type == 0
-# endif
-		&& mouse_col < Columns)
-	{
-	    in_tab_line = TRUE;
-	    c1 = TabPageIdxs[mouse_col];
-	    if (c1 >= 0)
-	    {
-		if ((mod_mask & MOD_MASK_MULTI_CLICK) == MOD_MASK_2CLICK)
-		{
-		    // double click opens new page
-		    end_visual_mode_keep_button();
-		    tabpage_new();
-		    tabpage_move(c1 == 0 ? 9999 : c1 - 1);
-		}
-		else
-		{
-		    // Go to specified tab page, or next one if not clicking
-		    // on a label.
-		    goto_tabpage(c1);
-
-		    // It's like clicking on the status line of a window.
-		    if (curwin != old_curwin)
-			end_visual_mode_keep_button();
-		}
-	    }
-	    else
-	    {
-		tabpage_T	*tp;
-
-		// Close the current or specified tab page.
-		if (c1 == -999)
-		    tp = curtab;
-		else
-		    tp = find_tabpage(-c1);
-		if (tp == curtab)
-		{
-		    if (first_tabpage->tp_next != NULL)
-			tabpage_close(FALSE);
-		}
-		else if (tp != NULL)
-		    tabpage_close_other(tp, FALSE);
-	    }
-	}
-	return TRUE;
-    }
-    else if (is_drag && in_tab_line)
-    {
-	c1 = TabPageIdxs[mouse_col];
-	tabpage_move(c1 <= 0 ? 9999 : c1 - 1);
-	return FALSE;
     }
 
     // When 'mousemodel' is "popup" or "popup_setpos", translate mouse events:
@@ -539,7 +564,7 @@ do_mouse(
 		    // menu on the button down event.
 		    return FALSE;
 #  endif
-#  if defined(FEAT_GUI_ATHENA) || defined(FEAT_GUI_MSWIN) || defined(FEAT_GUI_HAIKU)
+#  if defined(FEAT_GUI_MSWIN) || defined(FEAT_GUI_HAIKU)
 		if (is_click || is_drag)
 		    // Ignore right button down and drag mouse events.  Windows
 		    // only shows the popup menu on the button up event.
@@ -602,7 +627,7 @@ do_mouse(
 	    if (jump_flags)
 	    {
 		jump_flags = jump_to_mouse(jump_flags, NULL, which_button);
-		update_curbuf(VIsual_active ? INVERTED : VALID);
+		update_curbuf(VIsual_active ? UPD_INVERTED : UPD_VALID);
 		setcursor();
 		out_flush();    // Update before showing popup menu
 	    }
@@ -623,7 +648,7 @@ do_mouse(
 	}
     }
 
-    if ((State & (NORMAL | INSERT))
+    if ((State & (MODE_NORMAL | MODE_INSERT))
 			    && !(mod_mask & (MOD_MASK_SHIFT | MOD_MASK_CTRL)))
     {
 	if (which_button == MOUSE_LEFT)
@@ -816,7 +841,7 @@ do_mouse(
 	}
     }
     // If Visual mode started in insert mode, execute "CTRL-O"
-    else if ((State & INSERT) && VIsual_active)
+    else if ((State & MODE_INSERT) && VIsual_active)
 	stuffcharReadbuff(Ctrl_O);
 
     // Middle mouse click: Put text before cursor.
@@ -873,7 +898,7 @@ do_mouse(
     else if ((mod_mask & MOD_MASK_CTRL) || (curbuf->b_help
 		     && (mod_mask & MOD_MASK_MULTI_CLICK) == MOD_MASK_2CLICK))
     {
-	if (State & INSERT)
+	if (State & MODE_INSERT)
 	    stuffcharReadbuff(Ctrl_O);
 	stuffcharReadbuff(Ctrl_RSB);
 	got_click = FALSE;		// ignore drag&release now
@@ -883,7 +908,7 @@ do_mouse(
     // the mouse pointer
     else if ((mod_mask & MOD_MASK_SHIFT))
     {
-	if ((State & INSERT) || (VIsual_active && VIsual_select))
+	if ((State & MODE_INSERT) || (VIsual_active && VIsual_select))
 	    stuffcharReadbuff(Ctrl_O);
 	if (which_button == MOUSE_LEFT)
 	    stuffcharReadbuff('*');
@@ -912,7 +937,8 @@ do_mouse(
 	}
 #endif
     }
-    else if ((mod_mask & MOD_MASK_MULTI_CLICK) && (State & (NORMAL | INSERT))
+    else if ((mod_mask & MOD_MASK_MULTI_CLICK)
+				       && (State & (MODE_NORMAL | MODE_INSERT))
 	     && mouse_has(MOUSE_VISUAL))
     {
 	if (is_click || !VIsual_active)
@@ -1004,7 +1030,7 @@ do_mouse(
 	    curwin->w_set_curswant = TRUE;
 	}
 	if (is_click)
-	    redraw_curbuf_later(INVERTED);	// update the inversion
+	    redraw_curbuf_later(UPD_INVERTED);	// update the inversion
     }
     else if (VIsual_active && !old_active)
     {
@@ -1060,9 +1086,7 @@ ins_mouse(int c)
 	    curwin = new_curwin;
 	    curbuf = curwin->w_buffer;
 	}
-# ifdef FEAT_CINDENT
 	set_can_cindent(TRUE);
-# endif
     }
 
     // redraw status lines (in case another window became active)
@@ -1098,13 +1122,16 @@ ins_mousescroll(int dir)
     // Don't scroll the window in which completion is being done.
     if (!pum_visible() || curwin != old_curwin)
     {
+	long step;
+
 	if (dir == MSCR_DOWN || dir == MSCR_UP)
 	{
-	    if (mod_mask & (MOD_MASK_SHIFT | MOD_MASK_CTRL))
-		scroll_redraw(dir,
-			(long)(curwin->w_botline - curwin->w_topline));
+	    if (mouse_vert_step < 0
+		    || mod_mask & (MOD_MASK_SHIFT | MOD_MASK_CTRL))
+		step = (long)(curwin->w_botline - curwin->w_topline);
 	    else
-		scroll_redraw(dir, 3L);
+		step = mouse_vert_step;
+	    scroll_redraw(dir, step);
 # ifdef FEAT_PROP_POPUP
 	if (WIN_IS_POPUP(curwin))
 	    popup_set_firstline(curwin);
@@ -1113,10 +1140,13 @@ ins_mousescroll(int dir)
 #ifdef FEAT_GUI
 	else
 	{
-	    int val, step = 6;
+	    int val;
 
-	    if (mod_mask & (MOD_MASK_SHIFT | MOD_MASK_CTRL))
+	    if (mouse_hor_step < 0
+		    || mod_mask & (MOD_MASK_SHIFT | MOD_MASK_CTRL))
 		step = curwin->w_width;
+	    else
+		step = mouse_hor_step;
 	    val = curwin->w_leftcol + (dir == MSCR_RIGHT ? -step : step);
 	    if (val < 0)
 		val = 0;
@@ -1124,6 +1154,7 @@ ins_mousescroll(int dir)
 	}
 #endif
 	did_scroll = TRUE;
+	may_trigger_winscrolled();
     }
 
     curwin->w_redr_status = TRUE;
@@ -1136,16 +1167,14 @@ ins_mousescroll(int dir)
     // overlapped by the popup menu.
     if (pum_visible() && did_scroll)
     {
-	redraw_all_later(NOT_VALID);
+	redraw_all_later(UPD_NOT_VALID);
 	ins_compl_show_pum();
     }
 
     if (!EQUAL_POS(curwin->w_cursor, tpos))
     {
 	start_arrow(&tpos);
-# ifdef FEAT_CINDENT
 	set_can_cindent(TRUE);
-# endif
     }
 }
 
@@ -1412,13 +1441,14 @@ setmouse(void)
 
     if (VIsual_active)
 	checkfor = MOUSE_VISUAL;
-    else if (State == HITRETURN || State == ASKMORE || State == SETWSIZE)
+    else if (State == MODE_HITRETURN || State == MODE_ASKMORE
+						     || State == MODE_SETWSIZE)
 	checkfor = MOUSE_RETURN;
-    else if (State & INSERT)
+    else if (State & MODE_INSERT)
 	checkfor = MOUSE_INSERT;
-    else if (State & CMDLINE)
+    else if (State & MODE_CMDLINE)
 	checkfor = MOUSE_COMMAND;
-    else if (State == CONFIRM || State == EXTERNCMD)
+    else if (State == MODE_CONFIRM || State == MODE_EXTERNCMD)
 	checkfor = ' '; // don't use mouse for ":confirm" or ":!cmd"
     else
 	checkfor = MOUSE_NORMAL;    // assume normal mode
@@ -1516,8 +1546,9 @@ jump_to_mouse(
     int		first;
     int		row = mouse_row;
     int		col = mouse_col;
+    colnr_T	col_from_screen = -1;
 #ifdef FEAT_FOLDING
-    int		mouse_char;
+    int		mouse_char = ' ';
 #endif
 
     mouse_past_bottom = FALSE;
@@ -1569,7 +1600,7 @@ retnomove:
 	if (flags & MOUSE_MAY_STOP_VIS)
 	{
 	    end_visual_mode_keep_button();
-	    redraw_curbuf_later(INVERTED);	// delete the inversion
+	    redraw_curbuf_later(UPD_INVERTED);	// delete the inversion
 	}
 #if defined(FEAT_CMDWIN) && defined(FEAT_CLIPBOARD)
 	// Continue a modeless selection in another window.
@@ -1598,16 +1629,6 @@ retnomove:
 
     if (flags & MOUSE_SETPOS)
 	goto retnomove;				// ugly goto...
-
-#ifdef FEAT_FOLDING
-    // Remember the character under the mouse, it might be a '-' or '+' in the
-    // fold column.
-    if (row >= 0 && row < Rows && col >= 0 && col <= Columns
-						       && ScreenLines != NULL)
-	mouse_char = ScreenLines[LineOffset[row] + col];
-    else
-	mouse_char = ' ';
-#endif
 
     old_curwin = curwin;
     old_cursor = curwin->w_cursor;
@@ -1720,7 +1741,7 @@ retnomove:
 			&& (flags & MOUSE_MAY_STOP_VIS))))
 	{
 	    end_visual_mode_keep_button();
-	    redraw_curbuf_later(INVERTED);	// delete the inversion
+	    redraw_curbuf_later(UPD_INVERTED);	// delete the inversion
 	}
 #ifdef FEAT_CMDWIN
 	if (cmdwin_type != 0 && wp != curwin)
@@ -1792,7 +1813,7 @@ retnomove:
 	if (dragwin != NULL)
 	{
 	    // Drag the status line
-	    count = row - dragwin->w_winrow - dragwin->w_height + 1
+	    count = row - W_WINROW(dragwin) - dragwin->w_height + 1
 							     - on_status_line;
 	    win_drag_status_line(dragwin, count);
 	    did_drag |= count;
@@ -1824,7 +1845,7 @@ retnomove:
 	if (flags & MOUSE_MAY_STOP_VIS)
 	{
 	    end_visual_mode_keep_button();
-	    redraw_curbuf_later(INVERTED);	// delete the inversion
+	    redraw_curbuf_later(UPD_INVERTED);	// delete the inversion
 	}
 
 #if defined(FEAT_CMDWIN) && defined(FEAT_CLIPBOARD)
@@ -1886,7 +1907,7 @@ retnomove:
 #endif
 	    curwin->w_valid &=
 		      ~(VALID_WROW|VALID_CROW|VALID_BOTLINE|VALID_BOTLINE_AP);
-	    redraw_later(VALID);
+	    redraw_later(UPD_VALID);
 	    row = 0;
 	}
 	else if (row >= curwin->w_height)
@@ -1924,7 +1945,7 @@ retnomove:
 #ifdef FEAT_DIFF
 	    check_topfill(curwin, FALSE);
 #endif
-	    redraw_later(VALID);
+	    redraw_later(UPD_VALID);
 	    curwin->w_valid &=
 		      ~(VALID_WROW|VALID_CROW|VALID_BOTLINE|VALID_BOTLINE_AP);
 	    row = curwin->w_height - 1;
@@ -1940,6 +1961,23 @@ retnomove:
 		    && curwin->w_cursor.lnum == curwin->w_topline)
 		curwin->w_valid &= ~(VALID_TOPLINE);
 	}
+    }
+
+    if (prev_row >= 0 && prev_row < Rows && prev_col >= 0 && prev_col <= Columns
+						       && ScreenLines != NULL)
+    {
+	int off = LineOffset[prev_row] + prev_col;
+
+	// Only use ScreenCols[] after the window was redrawn.  Mainly matters
+	// for tests, a user would not click before redrawing.
+	// Do not use when 'virtualedit' is active.
+	if (curwin->w_redr_type <= UPD_VALID_NO_UPDATE && !virtual_active())
+	    col_from_screen = ScreenCols[off];
+#ifdef FEAT_FOLDING
+	// Remember the character under the mouse, it might be a '-' or '+' in
+	// the fold column.
+	mouse_char = ScreenLines[off];
+#endif
     }
 
 #ifdef FEAT_FOLDING
@@ -1974,16 +2012,40 @@ retnomove:
 	    redraw_cmdline = TRUE;	// show visual mode later
     }
 
-    curwin->w_curswant = col;
-    curwin->w_set_curswant = FALSE;	// May still have been TRUE
-    if (coladvance(col) == FAIL)	// Mouse click beyond end of line
+    if (col_from_screen >= 0)
     {
-	if (inclusive != NULL)
-	    *inclusive = TRUE;
-	mouse_past_eol = TRUE;
+	// Use the column from ScreenCols[], it is accurate also after
+	// concealed characters.
+	curwin->w_cursor.col = col_from_screen;
+	if (col_from_screen == MAXCOL)
+	{
+	    curwin->w_curswant = col_from_screen;
+	    curwin->w_set_curswant = FALSE;	// May still have been TRUE
+	    mouse_past_eol = TRUE;
+	    if (inclusive != NULL)
+		*inclusive = TRUE;
+	}
+	else
+	{
+	    curwin->w_set_curswant = TRUE;
+	    if (inclusive != NULL)
+		*inclusive = FALSE;
+	}
+	check_cursor_col();
     }
-    else if (inclusive != NULL)
-	*inclusive = FALSE;
+    else
+    {
+	curwin->w_curswant = col;
+	curwin->w_set_curswant = FALSE;	// May still have been TRUE
+	if (coladvance(col) == FAIL)	// Mouse click beyond end of line
+	{
+	    if (inclusive != NULL)
+		*inclusive = TRUE;
+	    mouse_past_eol = TRUE;
+	}
+	else if (inclusive != NULL)
+	    *inclusive = FALSE;
+    }
 
     count = IN_BUFFER;
     if (curwin != old_curwin || curwin->w_cursor.lnum != old_cursor.lnum
@@ -1991,7 +2053,7 @@ retnomove:
 	count |= CURSOR_MOVED;		// Cursor has moved
 
 # ifdef FEAT_FOLDING
-    if (mouse_char == fill_foldclosed)
+    if (mouse_char == curwin->w_fill_chars.foldclosed)
 	count |= MOUSE_FOLD_OPEN;
     else if (mouse_char != ' ')
 	count |= MOUSE_FOLD_CLOSE;
@@ -2001,8 +2063,9 @@ retnomove:
 }
 
 /*
- * Mouse scroll wheel: Default action is to scroll three lines, or one page
- * when Shift or Ctrl is used.
+ * Mouse scroll wheel: Default action is to scroll mouse_vert_step lines (or
+ * mouse_hor_step, depending on the scroll direction), or one page when Shift or
+ * Ctrl is used.
  * K_MOUSEUP (cap->arg == 1) or K_MOUSEDOWN (cap->arg == 0) or
  * K_MOUSELEFT (cap->arg == -1) or K_MOUSERIGHT (cap->arg == -2)
  */
@@ -2029,7 +2092,6 @@ nv_mousescroll(cmdarg_T *cap)
 	curwin = wp;
 	curbuf = curwin->w_buffer;
     }
-
     if (cap->arg == MSCR_UP || cap->arg == MSCR_DOWN)
     {
 # ifdef FEAT_TERMINAL
@@ -2039,21 +2101,21 @@ nv_mousescroll(cmdarg_T *cap)
 	    send_keys_to_term(curbuf->b_term, cap->cmdchar, mod_mask, FALSE);
 	else
 # endif
-	if (mod_mask & (MOD_MASK_SHIFT | MOD_MASK_CTRL))
+	if (mouse_vert_step < 0 || mod_mask & (MOD_MASK_SHIFT | MOD_MASK_CTRL))
 	{
 	    (void)onepage(cap->arg ? FORWARD : BACKWARD, 1L);
 	}
 	else
 	{
 	    // Don't scroll more than half the window height.
-	    if (curwin->w_height < 6)
+	    if (curwin->w_height < mouse_vert_step * 2)
 	    {
 		cap->count1 = curwin->w_height / 2;
 		if (cap->count1 == 0)
 		    cap->count1 = 1;
 	    }
 	    else
-		cap->count1 = 3;
+		cap->count1 = mouse_vert_step;
 	    cap->count0 = cap->count1;
 	    nv_scroll_line(cap);
 	}
@@ -2068,10 +2130,13 @@ nv_mousescroll(cmdarg_T *cap)
 	// Horizontal scroll - only allowed when 'wrap' is disabled
 	if (!curwin->w_p_wrap)
 	{
-	    int val, step = 6;
+	    int val, step;
 
-	    if (mod_mask & (MOD_MASK_SHIFT | MOD_MASK_CTRL))
+	    if (mouse_hor_step < 0
+		    || mod_mask & (MOD_MASK_SHIFT | MOD_MASK_CTRL))
 		step = curwin->w_width;
+	    else
+		step = mouse_hor_step;
 	    val = curwin->w_leftcol + (cap->arg == MSCR_RIGHT ? -step : +step);
 	    if (val < 0)
 		val = 0;
@@ -2084,6 +2149,7 @@ nv_mousescroll(cmdarg_T *cap)
     if (curwin != old_curwin && curwin->w_p_cul)
 	redraw_for_cursorline(curwin);
 # endif
+    may_trigger_winscrolled();
 
     curwin->w_redr_status = TRUE;
 
@@ -2249,7 +2315,7 @@ check_termcode_mouse(
 	//	    ^----- column
 	//	 ^-------- code
 	//
-	// \033[<%d;%d;%dm        : mouse release event
+	// \033[<%d;%d;%dm	  : mouse release event
 	//	       ^-- row
 	//	    ^----- column
 	//	 ^-------- code
@@ -2341,7 +2407,7 @@ check_termcode_mouse(
 	    // Apparently 0x23 and 0x24 are used by rxvt scroll wheel.
 	    // And 0x40 and 0x41 are used by some xterm emulator.
 	    wheel_code = mouse_code - (mouse_code >= 0x40 ? 0x40 : 0x23)
-		+ MOUSEWHEEL_LOW;
+							      + MOUSEWHEEL_LOW;
 	}
 #   endif
 
@@ -2530,9 +2596,9 @@ check_termcode_mouse(
 	 * Pe, the event code indicates what event caused this report
 	 *    The following event codes are defined:
 	 *    0 - request, the terminal received an explicit request for a
-	 *        locator report, but the locator is unavailable
+	 *	  locator report, but the locator is unavailable
 	 *    1 - request, the terminal received an explicit request for a
-	 *        locator report
+	 *	  locator report
 	 *    2 - left button down
 	 *    3 - left button up
 	 *    4 - middle button down
@@ -2726,8 +2792,10 @@ check_termcode_mouse(
 	    is_drag = TRUE;
 	current_button = held_button;
     }
-    else if (wheel_code == 0)
+    else
     {
+      if (wheel_code == 0)
+      {
 # ifdef CHECK_DOUBLE_CLICK
 #  ifdef FEAT_MOUSE_GPM
 	/*
@@ -2787,7 +2855,8 @@ check_termcode_mouse(
 	orig_num_clicks = NUM_MOUSE_CLICKS(mouse_code);
 # endif
 	is_click = TRUE;
-	orig_mouse_code = mouse_code;
+      }
+      orig_mouse_code = mouse_code;
     }
     if (!is_drag)
 	held_button = mouse_code & MOUSE_CLICK_MASK;
@@ -3031,7 +3100,7 @@ mouse_find_win(int *rowp, int *colp, mouse_find_T popup UNUSED)
 }
 
 #if defined(NEED_VCOL2COL) || defined(FEAT_BEVAL) || defined(FEAT_PROP_POPUP) \
-	|| defined(PROTO)
+	|| defined(FEAT_EVAL) || defined(PROTO)
 /*
  * Convert a virtual (screen) column to a character column.
  * The first column is one.
@@ -3039,18 +3108,20 @@ mouse_find_win(int *rowp, int *colp, mouse_find_T popup UNUSED)
     int
 vcol2col(win_T *wp, linenr_T lnum, int vcol)
 {
-    // try to advance to the specified column
-    int		count = 0;
-    char_u	*ptr;
-    char_u	*line;
+    char_u	    *line;
+    chartabsize_T   cts;
 
-    line = ptr = ml_get_buf(wp->w_buffer, lnum, FALSE);
-    while (count < vcol && *ptr != NUL)
+    // try to advance to the specified column
+    line = ml_get_buf(wp->w_buffer, lnum, FALSE);
+    init_chartabsize_arg(&cts, wp, lnum, 0, line, line);
+    while (cts.cts_vcol < vcol && *cts.cts_ptr != NUL)
     {
-	count += win_lbr_chartabsize(wp, line, ptr, count, NULL);
-	MB_PTR_ADV(ptr);
+	cts.cts_vcol += win_lbr_chartabsize(&cts, NULL);
+	MB_PTR_ADV(cts.cts_ptr);
     }
-    return (int)(ptr - line);
+    clear_chartabsize_arg(&cts);
+
+    return (int)(cts.cts_ptr - line);
 }
 #endif
 
@@ -3065,10 +3136,10 @@ f_getmousepos(typval_T *argvars UNUSED, typval_T *rettv)
     varnumber_T winid = 0;
     varnumber_T winrow = 0;
     varnumber_T wincol = 0;
-    linenr_T	line = 0;
+    linenr_T	lnum = 0;
     varnumber_T column = 0;
 
-    if (rettv_dict_alloc(rettv) != OK)
+    if (rettv_dict_alloc(rettv) == FAIL)
 	return;
     d = rettv->vval.v_dict;
 
@@ -3099,17 +3170,8 @@ f_getmousepos(typval_T *argvars UNUSED, typval_T *rettv)
 	    col -= left_off;
 	    if (row >= 0 && row < wp->w_height && col >= 0 && col < wp->w_width)
 	    {
-		char_u	*p;
-		int	count;
-
-		mouse_comp_pos(wp, &row, &col, &line, NULL);
-
-		// limit to text length plus one
-		p = ml_get_buf(wp->w_buffer, line, FALSE);
-		count = (int)STRLEN(p);
-		if (col > count)
-		    col = count;
-
+		(void)mouse_comp_pos(wp, &row, &col, &lnum, NULL);
+		col = vcol2col(wp, lnum, col);
 		column = col + 1;
 	    }
 	}
@@ -3117,7 +3179,7 @@ f_getmousepos(typval_T *argvars UNUSED, typval_T *rettv)
     dict_add_number(d, "winid", winid);
     dict_add_number(d, "winrow", winrow);
     dict_add_number(d, "wincol", wincol);
-    dict_add_number(d, "line", (varnumber_T)line);
+    dict_add_number(d, "line", (varnumber_T)lnum);
     dict_add_number(d, "column", column);
 }
 #endif

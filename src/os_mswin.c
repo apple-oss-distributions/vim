@@ -92,6 +92,7 @@ typedef int HFONT;
 typedef int HICON;
 typedef int HWND;
 typedef int INPUT_RECORD;
+typedef int INT_PTR;
 typedef int KEY_EVENT_RECORD;
 typedef int LOGFONTW;
 typedef int LPARAM;
@@ -429,23 +430,36 @@ slash_adjust(char_u *p)
     }
 }
 
-// Use 64-bit stat functions if available.
-#ifdef HAVE_STAT64
-# undef stat
-# undef _stat
-# undef _wstat
-# undef _fstat
-# define stat _stat64
-# define _stat _stat64
-# define _wstat _wstat64
-# define _fstat _fstat64
-#endif
+// Use 64-bit stat functions.
+#undef stat
+#undef _stat
+#undef _wstat
+#undef _fstat
+#define stat _stat64
+#define _stat _stat64
+#define _wstat _wstat64
+#define _fstat _fstat64
 
-#if (defined(_MSC_VER) && (_MSC_VER >= 1300)) || defined(__MINGW32__)
-# define OPEN_OH_ARGTYPE intptr_t
-#else
-# define OPEN_OH_ARGTYPE long
-#endif
+    static int
+read_reparse_point(const WCHAR *name, char_u *buf, DWORD *buf_len)
+{
+    HANDLE h;
+    BOOL ok;
+
+    h = CreateFileW(name, FILE_READ_ATTRIBUTES,
+	    FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+	    OPEN_EXISTING,
+	    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+	    NULL);
+    if (h == INVALID_HANDLE_VALUE)
+	return FAIL;
+
+    ok = DeviceIoControl(h, FSCTL_GET_REPARSE_POINT, NULL, 0, buf, *buf_len,
+	    buf_len, NULL);
+    CloseHandle(h);
+
+    return ok ? OK : FAIL;
+}
 
     static int
 wstat_symlink_aware(const WCHAR *name, stat_T *stp)
@@ -487,7 +501,7 @@ wstat_symlink_aware(const WCHAR *name, stat_T *stp)
 	{
 	    int	    fd;
 
-	    fd = _open_osfhandle((OPEN_OH_ARGTYPE)h, _O_RDONLY);
+	    fd = _open_osfhandle((intptr_t)h, _O_RDONLY);
 	    n = _fstat(fd, (struct _stat *)stp);
 	    if ((n == 0) && (attr & FILE_ATTRIBUTE_DIRECTORY))
 		stp->st_mode = (stp->st_mode & ~S_IFREG) | S_IFDIR;
@@ -497,6 +511,61 @@ wstat_symlink_aware(const WCHAR *name, stat_T *stp)
     }
 #endif
     return _wstat(name, (struct _stat *)stp);
+}
+
+    char_u *
+resolve_appexeclink(char_u *fname)
+{
+    DWORD		attr = 0;
+    int			idx;
+    WCHAR		*p, *end, *wname;
+    // The buffer size is arbitrarily chosen to be "big enough" (TM), the
+    // ceiling should be around 16k.
+    char_u		buf[4096];
+    DWORD		buf_len = sizeof(buf);
+    REPARSE_DATA_BUFFER *rb = (REPARSE_DATA_BUFFER *)buf;
+
+    wname = enc_to_utf16(fname, NULL);
+    if (wname == NULL)
+	return NULL;
+
+    attr = GetFileAttributesW(wname);
+    if (attr == INVALID_FILE_ATTRIBUTES ||
+	    (attr & FILE_ATTRIBUTE_REPARSE_POINT) == 0)
+    {
+	vim_free(wname);
+	return NULL;
+    }
+
+    // The applinks are similar to symlinks but with a huge difference: they can
+    // only be executed, any other I/O operation on them is bound to fail with
+    // ERROR_FILE_NOT_FOUND even though the file exists.
+    if (read_reparse_point(wname, buf, &buf_len) == FAIL)
+    {
+	vim_free(wname);
+	return NULL;
+    }
+    vim_free(wname);
+
+    if (rb->ReparseTag != IO_REPARSE_TAG_APPEXECLINK)
+	return NULL;
+
+    // The (undocumented) reparse buffer contains a set of N null-terminated
+    // Unicode strings, the application path is stored in the third one.
+    if (rb->AppExecLinkReparseBuffer.StringCount < 3)
+	return NULL;
+
+    p = rb->AppExecLinkReparseBuffer.StringList;
+    end = p + rb->ReparseDataLength / sizeof(WCHAR);
+    for (idx = 0; p < end
+	    && idx < (int)rb->AppExecLinkReparseBuffer.StringCount
+	    && idx != 2; )
+    {
+	if (*p++ == L'\0')
+	    ++idx;
+    }
+
+    return utf16_to_enc(p, NULL);
 }
 
 /*
@@ -596,7 +665,7 @@ mch_suspend(void)
 display_errors(void)
 {
 # ifdef FEAT_GUI
-    char *p;
+    char_u *p;
 
 #  ifdef VIMDLL
     if (gui.in_use || gui.starting)
@@ -605,15 +674,18 @@ display_errors(void)
 	if (error_ga.ga_data != NULL)
 	{
 	    // avoid putting up a message box with blanks only
-	    for (p = (char *)error_ga.ga_data; *p; ++p)
+	    for (p = (char_u *)error_ga.ga_data; *p; ++p)
 		if (!isspace(*p))
 		{
-		    (void)gui_mch_dialog(
+		    // Only use a dialog when not using --gui-dialog-file:
+		    // write text to a file.
+		    if (!gui_dialog_log((char_u *)"Errors", p))
+			(void)gui_mch_dialog(
 				     gui.starting ? VIM_INFO :
 					     VIM_ERROR,
 				     gui.starting ? (char_u *)_("Message") :
 					     (char_u *)_("Error"),
-				     (char_u *)p, (char_u *)_("&Ok"),
+					     p, (char_u *)_("&Ok"),
 					1, NULL, FALSE);
 		    break;
 		}
@@ -881,7 +953,7 @@ mch_libcall(
 	__except(EXCEPTION_EXECUTE_HANDLER)
 	{
 	    if (GetExceptionCode() == EXCEPTION_STACK_OVERFLOW)
-		RESETSTKOFLW();
+		_resetstkoflw();
 	    fRunTimeLinkSuccess = 0;
 	}
 # endif
@@ -1043,14 +1115,7 @@ swap_me(COLORREF colorref)
     return colorref;
 }
 
-// Attempt to make this work for old and new compilers
-# if !defined(_WIN64) && (!defined(_MSC_VER) || _MSC_VER < 1300)
-#  define PDP_RETVAL BOOL
-# else
-#  define PDP_RETVAL INT_PTR
-# endif
-
-    static PDP_RETVAL CALLBACK
+    static INT_PTR CALLBACK
 PrintDlgProc(
 	HWND hDlg,
 	UINT message,
@@ -1123,12 +1188,12 @@ AbortProc(HDC hdcPrn UNUSED, int iCode UNUSED)
 {
     MSG msg;
 
-    while (!*bUserAbort && pPeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+    while (!*bUserAbort && PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))
     {
-	if (!hDlgPrint || !pIsDialogMessage(hDlgPrint, &msg))
+	if (!hDlgPrint || !IsDialogMessageW(hDlgPrint, &msg))
 	{
 	    TranslateMessage(&msg);
-	    pDispatchMessage(&msg);
+	    DispatchMessageW(&msg);
 	}
     }
     return !*bUserAbort;
@@ -1907,6 +1972,10 @@ HWND message_window = 0;	    // window that's handling messages
 # define VIM_CLASSNAME      "VIM_MESSAGES"
 # define VIM_CLASSNAME_LEN  (sizeof(VIM_CLASSNAME) - 1)
 
+// Timeout for sending a message to another Vim instance.  Normally this works
+// instantly, but it may hang when the other Vim instance is halted.
+# define SENDMESSAGE_TIMEOUT	(5 * 1000)
+
 // Communication is via WM_COPYDATA messages. The message type is sent in
 // the dwData parameter. Types are defined here.
 # define COPYDATA_KEYS		0
@@ -1928,9 +1997,9 @@ static char_u	*client_enc = NULL;
 
 /*
  * Tell the other side what encoding we are using.
- * Errors are ignored.
+ * Return -1 if timeout happens.  Other errors are ignored.
  */
-    static void
+    static int
 serverSendEnc(HWND target)
 {
     COPYDATASTRUCT data;
@@ -1938,8 +2007,11 @@ serverSendEnc(HWND target)
     data.dwData = COPYDATA_ENCODING;
     data.cbData = (DWORD)STRLEN(p_enc) + 1;
     data.lpData = p_enc;
-    (void)SendMessage(target, WM_COPYDATA, (WPARAM)message_window,
-							     (LPARAM)(&data));
+    if (SendMessageTimeout(target, WM_COPYDATA,
+	    (WPARAM)message_window, (LPARAM)&data,
+	    SMTO_ABORTIFHUNG, SENDMESSAGE_TIMEOUT, NULL) == 0)
+	return -1;
+    return 0;
 }
 
 /*
@@ -1997,6 +2069,7 @@ Messaging_WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	COPYDATASTRUCT	reply;
 	char_u		*res;
 	int		retval;
+	DWORD_PTR	dwret = 0;
 	char_u		*str;
 	char_u		*tofree;
 
@@ -2050,9 +2123,17 @@ Messaging_WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	    reply.lpData = res;
 	    reply.cbData = (DWORD)STRLEN(res) + 1;
 
-	    serverSendEnc(sender);
-	    retval = (int)SendMessage(sender, WM_COPYDATA,
-				    (WPARAM)message_window, (LPARAM)(&reply));
+	    if (serverSendEnc(sender) < 0)
+		retval = -1;
+	    else
+	    {
+		if (SendMessageTimeout(sender, WM_COPYDATA,
+			(WPARAM)message_window, (LPARAM)&reply,
+			SMTO_ABORTIFHUNG, SENDMESSAGE_TIMEOUT, &dwret) == 0)
+		    retval = -1;
+		else
+		    retval = (int)dwret;
+	    }
 	    vim_free(tofree);
 	    vim_free(res);
 	    return retval;
@@ -2330,6 +2411,7 @@ serverSendReply(
     HWND	target;
     COPYDATASTRUCT data;
     long_u	n = 0;
+    DWORD_PTR	dwret = 0;
 
     // The "name" argument is a magic cookie obtained from expand("<client>").
     // It should be of the form 0xXXXXX - i.e. a C hex literal, which is the
@@ -2346,12 +2428,13 @@ serverSendReply(
     data.cbData = (DWORD)STRLEN(reply) + 1;
     data.lpData = reply;
 
-    serverSendEnc(target);
-    if (SendMessage(target, WM_COPYDATA, (WPARAM)message_window,
-							     (LPARAM)(&data)))
-	return 0;
-
-    return -1;
+    if (serverSendEnc(target) < 0)
+	return -1;
+    if (SendMessageTimeout(target, WM_COPYDATA,
+		(WPARAM)message_window, (LPARAM)&data,
+		SMTO_ABORTIFHUNG, SENDMESSAGE_TIMEOUT, &dwret) == 0)
+	return -1;
+    return dwret ? 0 : -1;
 }
 
     int
@@ -2368,6 +2451,7 @@ serverSendToVim(
     COPYDATASTRUCT data;
     char_u	*retval = NULL;
     int		retcode = 0;
+    DWORD_PTR	dwret = 0;
     char_u	altname_buf[MAX_PATH];
 
     // Execute locally if no display or target is ourselves
@@ -2399,9 +2483,13 @@ serverSendToVim(
     data.cbData = (DWORD)STRLEN(cmd) + 1;
     data.lpData = cmd;
 
-    serverSendEnc(target);
-    if (SendMessage(target, WM_COPYDATA, (WPARAM)message_window,
-							(LPARAM)(&data)) == 0)
+    if (serverSendEnc(target) < 0)
+	return -1;
+    if (SendMessageTimeout(target, WM_COPYDATA,
+		(WPARAM)message_window, (LPARAM)&data,
+		SMTO_ABORTIFHUNG, SENDMESSAGE_TIMEOUT, &dwret) == 0)
+	return -1;
+    if (dwret == 0)
 	return -1;
 
     if (asExpr)
@@ -2576,10 +2664,10 @@ serverProcessPendingMessages(void)
 {
     MSG msg;
 
-    while (pPeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+    while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))
     {
 	TranslateMessage(&msg);
-	pDispatchMessage(&msg);
+	DispatchMessageW(&msg);
     }
 }
 

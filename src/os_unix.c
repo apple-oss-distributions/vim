@@ -44,20 +44,36 @@ static int selinux_enabled = -1;
 #endif
 
 #ifdef __CYGWIN__
-# ifndef MSWIN
-#  include <cygwin/version.h>
-#  include <sys/cygwin.h>	// for cygwin_conv_to_posix_path() and/or
+# include <cygwin/version.h>
+# include <sys/cygwin.h>	// for cygwin_conv_to_posix_path() and/or
 				// for cygwin_conv_path()
-#  ifdef FEAT_CYGWIN_WIN32_CLIPBOARD
-#   define WIN32_LEAN_AND_MEAN
-#   include <windows.h>
-#   include "winclip.pro"
-#  endif
+# ifdef FEAT_CYGWIN_WIN32_CLIPBOARD
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#  include "winclip.pro"
 # endif
 #endif
 
 #ifdef FEAT_MOUSE_GPM
+
 # include <gpm.h>
+
+# ifdef DYNAMIC_GPM
+#  define Gpm_Open     (*dll_Gpm_Open)
+#  define Gpm_Close    (*dll_Gpm_Close)
+#  define Gpm_GetEvent (*dll_Gpm_GetEvent)
+#  define gpm_flag     (dll_gpm_flag != NULL ? *dll_gpm_flag :  0)
+#  define gpm_fd       (dll_gpm_fd   != NULL ? *dll_gpm_fd   : -1)
+
+static int (*dll_Gpm_Open)     (Gpm_Connect *, int);
+static int (*dll_Gpm_Close)    (void);
+static int (*dll_Gpm_GetEvent) (Gpm_Event *);
+static int *dll_gpm_flag;
+static int *dll_gpm_fd;
+
+static void *libgpm_hinst;
+# endif
+
 // <linux/keyboard.h> contains defines conflicting with "keymap.h",
 // I just copied relevant defines here. A cleaner solution would be to put gpm
 // code into separate file and include there linux/keyboard.h
@@ -83,7 +99,7 @@ static int mch_gpm_process(void);
 
 static int sysmouse_open(void);
 static void sysmouse_close(void);
-static RETSIGTYPE sig_sysmouse SIGPROTOARG;
+static void sig_sysmouse SIGPROTOARG;
 #endif
 
 /*
@@ -155,33 +171,34 @@ static int do_xterm_trace(void);
 static void handle_resize(void);
 
 #if defined(SIGWINCH)
-static RETSIGTYPE sig_winch SIGPROTOARG;
+static void sig_winch SIGPROTOARG;
 #endif
 #if defined(SIGTSTP)
-static RETSIGTYPE sig_tstp SIGPROTOARG;
-// volatile because it is used in signal handler sig_tstp() and sigcont_handler().
+static void sig_tstp SIGPROTOARG;
+// volatile because it is used in signal handler sig_tstp() and
+// sigcont_handler().
 static volatile sig_atomic_t in_mch_suspend = FALSE;
 #endif
 #if defined(SIGINT)
-static RETSIGTYPE catch_sigint SIGPROTOARG;
+static void catch_sigint SIGPROTOARG;
 #endif
 #if defined(SIGUSR1)
-static RETSIGTYPE catch_sigusr1 SIGPROTOARG;
+static void catch_sigusr1 SIGPROTOARG;
 #endif
 #if defined(SIGPWR)
-static RETSIGTYPE catch_sigpwr SIGPROTOARG;
+static void catch_sigpwr SIGPROTOARG;
 #endif
 #if defined(SIGALRM) && defined(FEAT_X11) && !defined(FEAT_GUI_GTK)
 # define SET_SIG_ALARM
-static RETSIGTYPE sig_alarm SIGPROTOARG;
+static void sig_alarm SIGPROTOARG;
 // volatile because it is used in signal handler sig_alarm().
 static volatile sig_atomic_t sig_alarm_called;
 #endif
-static RETSIGTYPE deathtrap SIGPROTOARG;
+static void deathtrap SIGPROTOARG;
 
 static void catch_int_signal(void);
 static void set_signals(void);
-static void catch_signals(RETSIGTYPE (*func_deadly)(), RETSIGTYPE (*func_other)());
+static void catch_signals(void (*func_deadly)(), void (*func_other)());
 #ifdef HAVE_SIGPROCMASK
 # define SIGSET_DECL(set)	sigset_t set;
 # define BLOCK_SIGNALS(set)	block_signals(set)
@@ -197,7 +214,7 @@ static int  have_dollars(int, char_u **);
 static int save_patterns(int num_pat, char_u **pat, int *num_file, char_u ***file);
 
 #ifndef SIG_ERR
-# define SIG_ERR	((RETSIGTYPE (*)())-1)
+# define SIG_ERR	((void (*)())-1)
 #endif
 
 // volatile because it is used in signal handler sig_winch().
@@ -874,18 +891,17 @@ init_signal_stack(void)
  * Let me try it with a few tricky defines from my own osdef.h	(jw).
  */
 #if defined(SIGWINCH)
-    static RETSIGTYPE
+    static void
 sig_winch SIGDEFARG(sigarg)
 {
     // this is not required on all systems, but it doesn't hurt anybody
-    signal(SIGWINCH, (RETSIGTYPE (*)())sig_winch);
+    signal(SIGWINCH, (void (*)())sig_winch);
     do_resize = TRUE;
-    SIGRETURN;
 }
 #endif
 
 #if defined(SIGTSTP)
-    static RETSIGTYPE
+    static void
 sig_tstp SIGDEFARG(sigarg)
 {
     // Second time we get called we actually need to suspend
@@ -894,49 +910,49 @@ sig_tstp SIGDEFARG(sigarg)
 	signal(SIGTSTP, ignore_sigtstp ? SIG_IGN : SIG_DFL);
 	raise(sigarg);
     }
+    else
+	got_tstp = TRUE;
 
-    // this is not required on all systems, but it doesn't hurt anybody
-    signal(SIGTSTP, (RETSIGTYPE (*)())sig_tstp);
-    got_tstp = TRUE;
-    SIGRETURN;
+#if !defined(__ANDROID__) && !defined(__OpenBSD__) && !defined(__DragonFly__)
+    // This is not required on all systems.  On some systems (at least Android,
+    // OpenBSD, and DragonFlyBSD) this breaks suspending with CTRL-Z.
+    signal(SIGTSTP, (void (*)())sig_tstp);
+#endif
 }
 #endif
 
 #if defined(SIGINT)
-    static RETSIGTYPE
+    static void
 catch_sigint SIGDEFARG(sigarg)
 {
     // this is not required on all systems, but it doesn't hurt anybody
-    signal(SIGINT, (RETSIGTYPE (*)())catch_sigint);
+    signal(SIGINT, (void (*)())catch_sigint);
     got_int = TRUE;
-    SIGRETURN;
 }
 #endif
 
 #if defined(SIGUSR1)
-    static RETSIGTYPE
+    static void
 catch_sigusr1 SIGDEFARG(sigarg)
 {
     // this is not required on all systems, but it doesn't hurt anybody
-    signal(SIGUSR1, (RETSIGTYPE (*)())catch_sigusr1);
+    signal(SIGUSR1, (void (*)())catch_sigusr1);
     got_sigusr1 = TRUE;
-    SIGRETURN;
 }
 #endif
 
 #if defined(SIGPWR)
-    static RETSIGTYPE
+    static void
 catch_sigpwr SIGDEFARG(sigarg)
 {
     // this is not required on all systems, but it doesn't hurt anybody
-    signal(SIGPWR, (RETSIGTYPE (*)())catch_sigpwr);
+    signal(SIGPWR, (void (*)())catch_sigpwr);
     /*
      * I'm not sure we get the SIGPWR signal when the system is really going
      * down or when the batteries are almost empty.  Just preserve the swap
      * files and don't exit, that can't do any harm.
      */
     ml_sync_all(FALSE, FALSE);
-    SIGRETURN;
 }
 #endif
 
@@ -944,12 +960,11 @@ catch_sigpwr SIGDEFARG(sigarg)
 /*
  * signal function for alarm().
  */
-    static RETSIGTYPE
+    static void
 sig_alarm SIGDEFARG(sigarg)
 {
     // doesn't do anything, just to break a system call
     sig_alarm_called = TRUE;
-    SIGRETURN;
 }
 #endif
 
@@ -1027,7 +1042,7 @@ mch_didjmp(void)
  * NOTE: Avoid unsafe functions, such as allocating memory, they can result in
  * a deadlock.
  */
-    static RETSIGTYPE
+    static void
 deathtrap SIGDEFARG(sigarg)
 {
     static int	entered = 0;	    // count the number of times we got here.
@@ -1060,7 +1075,7 @@ deathtrap SIGDEFARG(sigarg)
     // interrupt us.  But in cooked mode we may also get SIGQUIT, e.g., when
     // pressing CTRL-\, but we don't want Vim to exit then.
     if (in_mch_delay && sigarg == SIGQUIT)
-	SIGRETURN;
+	return;
 # endif
 
     // When SIGHUP, SIGQUIT, etc. are blocked: postpone the effect and return
@@ -1088,7 +1103,7 @@ deathtrap SIGDEFARG(sigarg)
 # endif
 		)
 	    && !vim_handle_signal(sigarg))
-	SIGRETURN;
+	return;
 #endif
 
     // Remember how often we have been called.
@@ -1187,8 +1202,6 @@ deathtrap SIGDEFARG(sigarg)
     may_core_dump();
     abort();
 #endif
-
-    SIGRETURN;
 }
 
 /*
@@ -1208,7 +1221,7 @@ after_sigcont(void)
 }
 
 #if defined(SIGCONT)
-static RETSIGTYPE sigcont_handler SIGPROTOARG;
+static void sigcont_handler SIGPROTOARG;
 
 /*
  * With multi-threading, suspending might not work immediately.  Catch the
@@ -1222,12 +1235,12 @@ static RETSIGTYPE sigcont_handler SIGPROTOARG;
  * volatile because it is used in signal handler sigcont_handler().
  */
 static volatile sig_atomic_t sigcont_received;
-static RETSIGTYPE sigcont_handler SIGPROTOARG;
+static void sigcont_handler SIGPROTOARG;
 
 /*
  * signal handler for SIGCONT
  */
-    static RETSIGTYPE
+    static void
 sigcont_handler SIGDEFARG(sigarg)
 {
     if (in_mch_suspend)
@@ -1241,12 +1254,10 @@ sigcont_handler SIGDEFARG(sigarg)
 	// back to a sane mode. We should redraw, but we can't really do that
 	// in a signal handler, do a redraw later.
 	after_sigcont();
-	redraw_later(CLEAR);
+	redraw_later(UPD_CLEAR);
 	cursor_on_force();
 	out_flush();
     }
-
-    SIGRETURN;
 }
 #endif
 
@@ -1398,12 +1409,19 @@ set_signals(void)
     /*
      * WINDOW CHANGE signal is handled with sig_winch().
      */
-    signal(SIGWINCH, (RETSIGTYPE (*)())sig_winch);
+    signal(SIGWINCH, (void (*)())sig_winch);
 #endif
 
 #ifdef SIGTSTP
     // See mch_init() for the conditions under which we ignore SIGTSTP.
-    signal(SIGTSTP, ignore_sigtstp ? SIG_IGN : (RETSIGTYPE (*)())sig_tstp);
+    // In the GUI default TSTP processing is OK.
+    // Checking both gui.in_use and gui.starting because gui.in_use is not set
+    // at this point (set after menus are displayed), but gui.starting is set.
+    signal(SIGTSTP, ignore_sigtstp ? SIG_IGN
+# ifdef FEAT_GUI
+				: gui.in_use || gui.starting ? SIG_DFL
+# endif
+				    : (void (*)())sig_tstp);
 #endif
 #if defined(SIGCONT)
     signal(SIGCONT, sigcont_handler);
@@ -1423,7 +1441,7 @@ set_signals(void)
     /*
      * Call user's handler on SIGUSR1
      */
-    signal(SIGUSR1, (RETSIGTYPE (*)())catch_sigusr1);
+    signal(SIGUSR1, (void (*)())catch_sigusr1);
 #endif
 
     /*
@@ -1438,7 +1456,7 @@ set_signals(void)
      * Catch SIGPWR (power failure?) to preserve the swap files, so that no
      * work will be lost.
      */
-    signal(SIGPWR, (RETSIGTYPE (*)())catch_sigpwr);
+    signal(SIGPWR, (void (*)())catch_sigpwr);
 #endif
 
     /*
@@ -1462,7 +1480,7 @@ set_signals(void)
     static void
 catch_int_signal(void)
 {
-    signal(SIGINT, (RETSIGTYPE (*)())catch_sigint);
+    signal(SIGINT, (void (*)())catch_sigint);
 }
 #endif
 
@@ -1478,8 +1496,8 @@ reset_signals(void)
 
     static void
 catch_signals(
-    RETSIGTYPE (*func_deadly)(),
-    RETSIGTYPE (*func_other)())
+    void (*func_deadly)(),
+    void (*func_other)())
 {
     int	    i;
 
@@ -1777,10 +1795,10 @@ ex_xrestore(exarg_T *eap)
 {
     if (eap->arg != NULL && STRLEN(eap->arg) > 0)
     {
-        if (xterm_display_allocated)
-            vim_free(xterm_display);
-        xterm_display = (char *)vim_strsave(eap->arg);
-        xterm_display_allocated = TRUE;
+	if (xterm_display_allocated)
+	    vim_free(xterm_display);
+	xterm_display = (char *)vim_strsave(eap->arg);
+	xterm_display_allocated = TRUE;
     }
     smsg(_("restoring display %s"), xterm_display == NULL
 		    ? (char *)mch_getenv((char_u *)"DISPLAY") : xterm_display);
@@ -1931,7 +1949,7 @@ get_x11_windis(void)
     if (x11_window != 0 && x11_display == NULL)
     {
 #ifdef SET_SIG_ALARM
-	RETSIGTYPE (*sig_save)();
+	void (*sig_save)();
 #endif
 #ifdef ELAPSED_FUNC
 	elapsed_T start_tv;
@@ -1946,15 +1964,14 @@ get_x11_windis(void)
 	 * the network connection is bad.  Set an alarm timer to get out.
 	 */
 	sig_alarm_called = FALSE;
-	sig_save = (RETSIGTYPE (*)())signal(SIGALRM,
-						 (RETSIGTYPE (*)())sig_alarm);
+	sig_save = (void (*)())signal(SIGALRM, (void (*)())sig_alarm);
 	alarm(2);
 #endif
 	x11_display = XOpenDisplay(NULL);
 
 #ifdef SET_SIG_ALARM
 	alarm(0);
-	signal(SIGALRM, (RETSIGTYPE (*)())sig_save);
+	signal(SIGALRM, (void (*)())sig_save);
 	if (p_verbose > 0 && sig_alarm_called)
 	    verb_msg(_("Opening the X display timed out"));
 #endif
@@ -3761,7 +3778,7 @@ get_tty_info(int fd, ttyinfo_T *info)
 static int	mouse_ison = FALSE;
 
 /*
- * Set mouse clicks on or off.
+ * Set mouse clicks on or off and possible enable mouse movement events.
  */
     void
 mch_setmouse(int on)
@@ -3791,10 +3808,7 @@ mch_setmouse(int on)
 #ifdef FEAT_MOUSE_URXVT
     if (ttym_flags == TTYM_URXVT)
     {
-	out_str_nf((char_u *)
-		   (on
-		   ? IF_EB("\033[?1015h", ESC_STR "[?1015h")
-		   : IF_EB("\033[?1015l", ESC_STR "[?1015l")));
+	out_str_nf((char_u *)(on ? "\033[?1015h" : "\033[?1015l"));
 	mouse_ison = on;
     }
 #endif
@@ -3802,10 +3816,7 @@ mch_setmouse(int on)
     if (ttym_flags == TTYM_SGR)
     {
 	// SGR mode supports columns above 223
-	out_str_nf((char_u *)
-		   (on
-		   ? IF_EB("\033[?1006h", ESC_STR "[?1006h")
-		   : IF_EB("\033[?1006l", ESC_STR "[?1006l")));
+	out_str_nf((char_u *)(on ? "\033[?1006h" : "\033[?1006l"));
 	mouse_ison = on;
     }
 
@@ -3815,8 +3826,7 @@ mch_setmouse(int on)
 	bevalterm_ison = (p_bevalterm && on);
 	if (xterm_mouse_vers > 1 && !bevalterm_ison)
 	    // disable mouse movement events, enabling is below
-	    out_str_nf((char_u *)
-			(IF_EB("\033[?1003l", ESC_STR "[?1003l")));
+	    out_str_nf((char_u *)("\033[?1003l"));
     }
 #endif
 
@@ -3827,16 +3837,13 @@ mch_setmouse(int on)
 		       (xterm_mouse_vers > 1
 			? (
 #ifdef FEAT_BEVAL_TERM
-			    bevalterm_ison
-			       ? IF_EB("\033[?1003h", ESC_STR "[?1003h") :
+			    bevalterm_ison ? "\033[?1003h" :
 #endif
-			      IF_EB("\033[?1002h", ESC_STR "[?1002h"))
-			: IF_EB("\033[?1000h", ESC_STR "[?1000h")));
+			      "\033[?1002h")
+			: "\033[?1000h"));
 	else	// disable mouse events, could probably always send the same
 	    out_str_nf((char_u *)
-		       (xterm_mouse_vers > 1
-			? IF_EB("\033[?1002l", ESC_STR "[?1002l")
-			: IF_EB("\033[?1000l", ESC_STR "[?1000l")));
+		       (xterm_mouse_vers > 1 ? "\033[?1002l" : "\033[?1000l"));
 	mouse_ison = on;
     }
 
@@ -3904,18 +3911,15 @@ mch_setmouse(int on)
 	    //	  5 = Windows UP Arrow
 # ifdef JSBTERM_MOUSE_NONADVANCED
 	    // Disables full feedback of pointer movements
-	    out_str_nf((char_u *)IF_EB("\033[0~ZwLMRK1Q\033\\",
-					 ESC_STR "[0~ZwLMRK1Q" ESC_STR "\\"));
+	    out_str_nf((char_u *)"\033[0~ZwLMRK1Q\033\\");
 # else
-	    out_str_nf((char_u *)IF_EB("\033[0~ZwLMRK+1Q\033\\",
-					ESC_STR "[0~ZwLMRK+1Q" ESC_STR "\\"));
+	    out_str_nf((char_u *)"\033[0~ZwLMRK+1Q\033\\");
 # endif
 	    mouse_ison = TRUE;
 	}
 	else
 	{
-	    out_str_nf((char_u *)IF_EB("\033[0~ZwQ\033\\",
-					      ESC_STR "[0~ZwQ" ESC_STR "\\"));
+	    out_str_nf((char_u *)"\033[0~ZwQ\033\\");
 	    mouse_ison = FALSE;
 	}
     }
@@ -3961,8 +3965,7 @@ check_mouse_termcode(void)
 	    )
     {
 	set_mouse_termcode(KS_MOUSE, (char_u *)(term_is_8bit(T_NAME)
-		    ? IF_EB("\233M", CSI_STR "M")
-		    : IF_EB("\033[M", ESC_STR "[M")));
+							? "\233M" : "\033[M"));
 	if (*p_mouse != NUL)
 	{
 	    // force mouse off and maybe on to send possibly new mouse
@@ -3981,8 +3984,7 @@ check_mouse_termcode(void)
 	    && !gui.in_use
 #  endif
 	    )
-	set_mouse_termcode(KS_GPM_MOUSE,
-				      (char_u *)IF_EB("\033MG", ESC_STR "MG"));
+	set_mouse_termcode(KS_GPM_MOUSE, (char_u *)"\033MG");
     else
 	del_mouse_termcode(KS_GPM_MOUSE);
 # endif
@@ -3993,7 +3995,7 @@ check_mouse_termcode(void)
 	    && !gui.in_use
 #  endif
 	    )
-	set_mouse_termcode(KS_MOUSE, (char_u *)IF_EB("\033MS", ESC_STR "MS"));
+	set_mouse_termcode(KS_MOUSE, (char_u *)"\033MS");
 # endif
 
 # ifdef FEAT_MOUSE_JSB
@@ -4003,8 +4005,7 @@ check_mouse_termcode(void)
 	    && !gui.in_use
 #  endif
 	    )
-	set_mouse_termcode(KS_JSBTERM_MOUSE,
-			       (char_u *)IF_EB("\033[0~zw", ESC_STR "[0~zw"));
+	set_mouse_termcode(KS_JSBTERM_MOUSE, (char_u *)"\033[0~zw");
     else
 	del_mouse_termcode(KS_JSBTERM_MOUSE);
 # endif
@@ -4017,8 +4018,7 @@ check_mouse_termcode(void)
 	    && !gui.in_use
 #  endif
 	    )
-	set_mouse_termcode(KS_NETTERM_MOUSE,
-				       (char_u *)IF_EB("\033}", ESC_STR "}"));
+	set_mouse_termcode(KS_NETTERM_MOUSE, (char_u *)"\033}");
     else
 	del_mouse_termcode(KS_NETTERM_MOUSE);
 # endif
@@ -4031,7 +4031,7 @@ check_mouse_termcode(void)
 #  endif
 	    )
 	set_mouse_termcode(KS_DEC_MOUSE, (char_u *)(term_is_8bit(T_NAME)
-		     ? IF_EB("\233", CSI_STR) : IF_EB("\033[", ESC_STR "[")));
+							  ? "\233" : "\033["));
     else
 	del_mouse_termcode(KS_DEC_MOUSE);
 # endif
@@ -4042,8 +4042,7 @@ check_mouse_termcode(void)
 	    && !gui.in_use
 #  endif
 	    )
-	set_mouse_termcode(KS_PTERM_MOUSE,
-				      (char_u *) IF_EB("\033[", ESC_STR "["));
+	set_mouse_termcode(KS_PTERM_MOUSE, (char_u *)"\033[");
     else
 	del_mouse_termcode(KS_PTERM_MOUSE);
 # endif
@@ -4055,8 +4054,7 @@ check_mouse_termcode(void)
 	    )
     {
 	set_mouse_termcode(KS_URXVT_MOUSE, (char_u *)(term_is_8bit(T_NAME)
-		    ? IF_EB("\233*M", CSI_STR "*M")
-		    : IF_EB("\033[*M", ESC_STR "[*M")));
+						      ? "\233*M" : "\033[*M"));
 
 	if (*p_mouse != NUL)
 	{
@@ -4074,12 +4072,10 @@ check_mouse_termcode(void)
 	    )
     {
 	set_mouse_termcode(KS_SGR_MOUSE, (char_u *)(term_is_8bit(T_NAME)
-		    ? IF_EB("\233<*M", CSI_STR "<*M")
-		    : IF_EB("\033[<*M", ESC_STR "[<*M")));
+						    ? "\233<*M" : "\033[<*M"));
 
 	set_mouse_termcode(KS_SGR_MOUSE_RELEASE, (char_u *)(term_is_8bit(T_NAME)
-		    ? IF_EB("\233<*m", CSI_STR "<*m")
-		    : IF_EB("\033[<*m", ESC_STR "[<*m")));
+						    ? "\233<*m" : "\033[<*m"));
 
 	if (*p_mouse != NUL)
 	{
@@ -4556,7 +4552,10 @@ mch_call_shell_terminal(
     // restore curwin/curbuf and a few other things
     aucmd_restbuf(&aco);
 
-    wait_return(TRUE);
+    // only require pressing Enter when redrawing, to avoid that system() gets
+    // the hit-enter prompt even though it didn't output anything.
+    if (!RedrawingDisabled)
+	wait_return(TRUE);
     do_buffer(DOBUF_WIPE, DOBUF_FIRST, FORWARD, buf->b_fnum, TRUE);
 
 theend:
@@ -5000,7 +4999,7 @@ mch_call_shell_fork(
 		p_more_save = p_more;
 		p_more = FALSE;
 		old_State = State;
-		State = EXTERNCMD;	// don't redraw at window resize
+		State = MODE_EXTERNCMD;	// don't redraw at window resize
 
 		if ((options & SHELL_WRITE) && toshell_fd >= 0)
 		{
@@ -5504,6 +5503,9 @@ mch_call_shell(
     char_u	*cmd,
     int		options)	// SHELL_*, see vim.h
 {
+#ifdef FEAT_JOB_CHANNEL
+    ch_log(NULL, "executing shell command: %s", cmd);
+#endif
 #if defined(FEAT_GUI) && defined(FEAT_TERMINAL)
     if (gui.in_use && vim_strchr(p_go, GO_TERMINAL) != NULL)
 	return mch_call_shell_terminal(cmd, options);
@@ -5688,7 +5690,7 @@ mch_job_start(char **argv, job_T *job, jobopt_T *options, int is_terminal)
 		{
 		    typval_T *item = &dict_lookup(hi)->di_tv;
 
-		    vim_setenv((char_u*)hi->hi_key, tv_get_string(item));
+		    vim_setenv(hi->hi_key, tv_get_string(item));
 		    --todo;
 		}
 	}
@@ -6126,7 +6128,7 @@ WaitForCharOrMouse(long msec, int *interrupted, int ignore_input)
     {
 	WantQueryMouse = FALSE;
 	if (!no_query_mouse_for_testing)
-	    mch_write((char_u *)IF_EB("\033[1'|", ESC_STR "[1'|"), 5);
+	    mch_write((char_u *)"\033[1'|", 5);
     }
 #endif
 
@@ -6386,7 +6388,7 @@ select_eintr:
 	FD_ZERO(&wfds);
 	FD_ZERO(&efds);
 	FD_SET(fd, &rfds);
-# if !defined(__QNX__) && !defined(__CYGWIN32__)
+# ifndef __QNX__
 	// For QNX select() always returns 1 if this is set.  Why?
 	FD_SET(fd, &efds);
 # endif
@@ -6444,6 +6446,7 @@ select_eintr:
 	    if (got_tstp && !in_mch_suspend)
 	    {
 		exarg_T ea;
+
 		ea.forceit = TRUE;
 		ex_stop(&ea);
 		got_tstp = FALSE;
@@ -6490,7 +6493,7 @@ select_eintr:
 	}
 # endif
 # ifdef FEAT_MOUSE_GPM
-	if (ret > 0 && gpm_flag && check_for_gpm != NULL && gpm_fd >= 0)
+	if (ret > 0 && check_for_gpm != NULL && gpm_flag && gpm_fd >= 0)
 	{
 	    if (FD_ISSET(gpm_fd, &efds))
 		gpm_close();
@@ -7216,6 +7219,49 @@ mch_rename(const char *src, const char *dest)
 #endif // !HAVE_RENAME
 
 #if defined(FEAT_MOUSE_GPM) || defined(PROTO)
+# if defined(DYNAMIC_GPM) || defined(PROTO)
+/*
+ * Initialize Gpm's symbols for dynamic linking.
+ * Must be called only if libgpm_hinst is NULL.
+ */
+    static int
+load_libgpm(void)
+{
+    libgpm_hinst = dlopen("libgpm.so", RTLD_LAZY|RTLD_GLOBAL);
+
+    if (libgpm_hinst == NULL)
+    {
+	if (p_verbose > 0)
+	    smsg_attr(HL_ATTR(HLF_W),
+			       _("Could not load gpm library: %s"), dlerror());
+	return FAIL;
+    }
+
+    if (
+	    (dll_Gpm_Open     = dlsym(libgpm_hinst, "Gpm_Open"))     == NULL
+	||  (dll_Gpm_Close    = dlsym(libgpm_hinst, "Gpm_Close"))    == NULL
+	||  (dll_Gpm_GetEvent = dlsym(libgpm_hinst, "Gpm_GetEvent")) == NULL
+	||  (dll_gpm_flag     = dlsym(libgpm_hinst, "gpm_flag"))     == NULL
+	||  (dll_gpm_fd       = dlsym(libgpm_hinst, "gpm_fd"))       == NULL
+      )
+    {
+	semsg(_(e_could_not_load_library_str_str), "gpm", dlerror());
+	dlclose(libgpm_hinst);
+	libgpm_hinst = NULL;
+	dll_gpm_flag = NULL;
+	dll_gpm_fd   = NULL;
+	return FAIL;
+    }
+    return OK;
+}
+
+    int
+gpm_available(void)
+{
+    return libgpm_hinst != NULL || load_libgpm() == OK;
+}
+# endif // DYNAMIC_GPM
+
 /*
  * Initializes connection with gpm (if it isn't already opened)
  * Return 1 if succeeded (or connection already opened), 0 if failed
@@ -7224,6 +7270,11 @@ mch_rename(const char *src, const char *dest)
 gpm_open(void)
 {
     static Gpm_Connect gpm_connect; // Must it be kept till closing ?
+
+#ifdef DYNAMIC_GPM
+    if (!gpm_available())
+	return 0;
+#endif
 
     if (!gpm_flag)
     {
@@ -7239,7 +7290,7 @@ gpm_open(void)
 	    // we are going to suspend or starting an external process
 	    // so we shouldn't  have problem with this
 # ifdef SIGTSTP
-	    signal(SIGTSTP, restricted ? SIG_IGN : (RETSIGTYPE (*)())sig_tstp);
+	    signal(SIGTSTP, restricted ? SIG_IGN : (void (*)())sig_tstp);
 # endif
 	    return 1; // succeed
 	}
@@ -7372,7 +7423,7 @@ sysmouse_open(void)
     mouse.u.mode.signal = SIGUSR2;
     if (ioctl(1, CONS_MOUSECTL, &mouse) != -1)
     {
-	signal(SIGUSR2, (RETSIGTYPE (*)())sig_sysmouse);
+	signal(SIGUSR2, (void (*)())sig_sysmouse);
 	mouse.operation = MOUSE_SHOW;
 	ioctl(1, CONS_MOUSECTL, &mouse);
 	return OK;
@@ -7399,7 +7450,7 @@ sysmouse_close(void)
 /*
  * Gets info from sysmouse and adds special keys to input buf.
  */
-    static RETSIGTYPE
+    static void
 sig_sysmouse SIGDEFARG(sigarg)
 {
     struct mouse_info	mouse;
@@ -7508,7 +7559,7 @@ mch_libcall(
     if (hinstLib == NULL)
     {
 	// "dlerr" must be used before dlclose()
-	dlerr = (char *)dlerror();
+	dlerr = dlerror();
 	if (dlerr != NULL)
 	    semsg(_("dlerror = \"%s\""), dlerr);
     }
@@ -7543,7 +7594,7 @@ mch_libcall(
 	    {
 # if defined(USE_DLOPEN)
 		*(void **)(&ProcAdd) = dlsym(hinstLib, (const char *)funcname);
-		dlerr = (char *)dlerror();
+		dlerr = dlerror();
 # else
 		if (shl_findsym(&hinstLib, (const char *)funcname,
 					TYPE_PROCEDURE, (void *)&ProcAdd) < 0)
@@ -7565,7 +7616,7 @@ mch_libcall(
 	    {
 # if defined(USE_DLOPEN)
 		*(void **)(&ProcAddI) = dlsym(hinstLib, (const char *)funcname);
-		dlerr = (char *)dlerror();
+		dlerr = dlerror();
 # else
 		if (shl_findsym(&hinstLib, (const char *)funcname,
 				       TYPE_PROCEDURE, (void *)&ProcAddI) < 0)
@@ -8229,113 +8280,231 @@ xsmp_close(void)
 }
 #endif // USE_XSMP
 
+#if defined(FEAT_RELTIME) || defined(PROTO)
+# if defined(HAVE_TIMER_CREATE) || defined(PROTO)
+/*
+ * Implement timeout with timer_create() and timer_settime().
+ */
+static volatile sig_atomic_t timeout_flag = FALSE;
+static timer_t		     timer_id;
+static int		     timer_created = FALSE;
 
-#ifdef EBCDIC
-// Translate character to its CTRL- value
-char CtrlTable[] =
+/*
+ * Callback for when the timer expires.
+ */
+    static void
+set_flag(union sigval _unused UNUSED)
 {
-/* 00 - 5E */
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-/* ^ */ 0x1E,
-/* - */ 0x1F,
-/* 61 - 6C */
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-/* _ */ 0x1F,
-/* 6E - 80 */
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-/* a */ 0x01,
-/* b */ 0x02,
-/* c */ 0x03,
-/* d */ 0x37,
-/* e */ 0x2D,
-/* f */ 0x2E,
-/* g */ 0x2F,
-/* h */ 0x16,
-/* i */ 0x05,
-/* 8A - 90 */
-	0, 0, 0, 0, 0, 0, 0,
-/* j */ 0x15,
-/* k */ 0x0B,
-/* l */ 0x0C,
-/* m */ 0x0D,
-/* n */ 0x0E,
-/* o */ 0x0F,
-/* p */ 0x10,
-/* q */ 0x11,
-/* r */ 0x12,
-/* 9A - A1 */
-	0, 0, 0, 0, 0, 0, 0, 0,
-/* s */ 0x13,
-/* t */ 0x3C,
-/* u */ 0x3D,
-/* v */ 0x32,
-/* w */ 0x26,
-/* x */ 0x18,
-/* y */ 0x19,
-/* z */ 0x3F,
-/* AA - AC */
-	0, 0, 0,
-/* [ */ 0x27,
-/* AE - BC */
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-/* ] */ 0x1D,
-/* BE - C0 */ 0, 0, 0,
-/* A */ 0x01,
-/* B */ 0x02,
-/* C */ 0x03,
-/* D */ 0x37,
-/* E */ 0x2D,
-/* F */ 0x2E,
-/* G */ 0x2F,
-/* H */ 0x16,
-/* I */ 0x05,
-/* CA - D0 */ 0, 0, 0, 0, 0, 0, 0,
-/* J */ 0x15,
-/* K */ 0x0B,
-/* L */ 0x0C,
-/* M */ 0x0D,
-/* N */ 0x0E,
-/* O */ 0x0F,
-/* P */ 0x10,
-/* Q */ 0x11,
-/* R */ 0x12,
-/* DA - DF */ 0, 0, 0, 0, 0, 0,
-/* \ */ 0x1C,
-/* E1 */ 0,
-/* S */ 0x13,
-/* T */ 0x3C,
-/* U */ 0x3D,
-/* V */ 0x32,
-/* W */ 0x26,
-/* X */ 0x18,
-/* Y */ 0x19,
-/* Z */ 0x3F,
-/* EA - FF*/ 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-};
+    timeout_flag = TRUE;
+}
 
-char MetaCharTable[]=
-{//   0   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F
-      0,  0,  0,  0,'\\', 0,'F',  0,'W','M','N',  0,  0,  0,  0,  0,
-      0,  0,  0,  0,']',  0,  0,'G',  0,  0,'R','O',  0,  0,  0,  0,
-    '@','A','B','C','D','E',  0,  0,'H','I','J','K','L',  0,  0,  0,
-    'P','Q',  0,'S','T','U','V',  0,'X','Y','Z','[',  0,  0,'^',  0
-};
+/*
+ * Stop any active timeout.
+ */
+    void
+stop_timeout(void)
+{
+    static struct itimerspec disarm = {{0, 0}, {0, 0}};
 
+    if (timer_created)
+    {
+	int ret = timer_settime(timer_id, 0, &disarm, NULL);
 
-// TODO: Use characters NOT numbers!!!
-char CtrlCharTable[]=
-{//   0   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F
-    124,193,194,195,  0,201,  0,  0,  0,  0,  0,210,211,212,213,214,
-    215,216,217,226,  0,209,200,  0,231,232,  0,  0,224,189, 95,109,
-      0,  0,  0,  0,  0,  0,230,173,  0,  0,  0,  0,  0,197,198,199,
-      0,  0,229,  0,  0,  0,  0,196,  0,  0,  0,  0,227,228,  0,233,
-};
+	if (ret < 0)
+	    semsg(_(e_could_not_clear_timeout_str), strerror(errno));
+    }
 
+    // Clear the current timeout flag; any previous timeout should be
+    // considered _not_ triggered.
+    timeout_flag = FALSE;
+}
 
-#endif
+/*
+ * Start the timeout timer.
+ *
+ * The return value is a pointer to a flag that is initialised to FALSE. If the
+ * timeout expires, the flag is set to TRUE. This will only return pointers to
+ * static memory; i.e. any pointer returned by this function may always be
+ * safely dereferenced.
+ *
+ * This function is not expected to fail, but if it does it will still return a
+ * valid flag pointer; the flag will remain stuck as FALSE .
+ */
+    volatile sig_atomic_t *
+start_timeout(long msec)
+{
+    struct itimerspec interval = {
+	    {0, 0},                                   // Do not repeat.
+	    {msec / 1000, (msec % 1000) * 1000000}};  // Timeout interval
+    int ret;
+
+    // This is really the caller's responsibility, but let's make sure the
+    // previous timer has been stopped.
+    stop_timeout();
+
+    if (!timer_created)
+    {
+	struct sigevent action = {0};
+
+	action.sigev_notify = SIGEV_THREAD;
+	action.sigev_notify_function = set_flag;
+        ret = timer_create(CLOCK_MONOTONIC, &action, &timer_id);
+        if (ret < 0)
+	{
+	    semsg(_(e_could_not_set_timeout_str), strerror(errno));
+	    return &timeout_flag;
+	}
+	timer_created = TRUE;
+    }
+
+# ifdef FEAT_JOB_CHANNEL
+    ch_log(NULL, "setting timeout timer to %d sec %ld nsec",
+	       (int)interval.it_value.tv_sec, (long)interval.it_value.tv_nsec);
+# endif
+    ret = timer_settime(timer_id, 0, &interval, NULL);
+    if (ret < 0)
+	semsg(_(e_could_not_set_timeout_str), strerror(errno));
+
+    return &timeout_flag;
+}
+
+/*
+ * To be used before fork/exec: delete any created timer.
+ */
+    void
+delete_timer(void)
+{
+    if (timer_created)
+    {
+	timer_delete(timer_id);
+	timer_created = FALSE;
+    }
+}
+
+# else // HAVE_TIMER_CREATE
+
+/*
+ * Implement timeout with setitimer()
+ */
+static struct sigaction		prev_sigaction;
+static volatile sig_atomic_t	timeout_flag         = FALSE;
+static int			timer_active         = FALSE;
+static int			timer_handler_active = FALSE;
+static volatile sig_atomic_t	alarm_pending        = FALSE;
+
+/*
+ * Handle SIGALRM for a timeout.
+ */
+    static void
+set_flag SIGDEFARG(sigarg)
+{
+    if (alarm_pending)
+	alarm_pending = FALSE;
+    else
+	timeout_flag = TRUE;
+}
+
+/*
+ * Stop any active timeout.
+ */
+    void
+stop_timeout(void)
+{
+    static struct itimerval disarm = {{0, 0}, {0, 0}};
+    int			    ret;
+
+    if (timer_active)
+    {
+	timer_active = FALSE;
+	ret = setitimer(ITIMER_REAL, &disarm, NULL);
+	if (ret < 0)
+	    // Should only get here as a result of coding errors.
+	    semsg(_(e_could_not_clear_timeout_str), strerror(errno));
+    }
+
+    if (timer_handler_active)
+    {
+	timer_handler_active = FALSE;
+	ret = sigaction(SIGALRM, &prev_sigaction, NULL);
+	if (ret < 0)
+	    // Should only get here as a result of coding errors.
+	    semsg(_(e_could_not_reset_handler_for_timeout_str),
+							      strerror(errno));
+    }
+    timeout_flag = FALSE;
+}
+
+/*
+ * Start the timeout timer.
+ *
+ * The return value is a pointer to a flag that is initialised to FALSE. If the
+ * timeout expires, the flag is set to TRUE. This will only return pointers to
+ * static memory; i.e. any pointer returned by this function may always be
+ * safely dereferenced.
+ *
+ * This function is not expected to fail, but if it does it will still return a
+ * valid flag pointer; the flag will remain stuck as FALSE .
+ */
+    volatile sig_atomic_t *
+start_timeout(long msec)
+{
+    struct itimerval	interval = {
+	    {0, 0},                                // Do not repeat.
+	    {msec / 1000, (msec % 1000) * 1000}};  // Timeout interval
+    struct sigaction	handle_alarm;
+    int			ret;
+    sigset_t		sigs;
+    sigset_t		saved_sigs;
+
+    // This is really the caller's responsibility, but let's make sure the
+    // previous timer has been stopped.
+    stop_timeout();
+
+    // There is a small chance that SIGALRM is pending and so the handler must
+    // ignore it on the first call.
+    alarm_pending = FALSE;
+    ret = sigemptyset(&sigs);
+    ret = ret == 0 ? sigaddset(&sigs, SIGALRM) : ret;
+    ret = ret == 0 ? sigprocmask(SIG_BLOCK, &sigs, &saved_sigs) : ret;
+    timeout_flag = FALSE;
+    ret = ret == 0 ? sigpending(&sigs) : ret;
+    if (ret == 0)
+    {
+	alarm_pending = sigismember(&sigs, SIGALRM);
+	ret = sigprocmask(SIG_SETMASK, &saved_sigs, NULL);
+    }
+    if (unlikely(ret != 0 || alarm_pending < 0))
+    {
+	// Just catching coding errors. Write an error message, but carry on.
+	semsg(_(e_could_not_check_for_pending_sigalrm_str), strerror(errno));
+	alarm_pending = FALSE;
+    }
+
+    // Set up the alarm handler first.
+    ret = sigemptyset(&handle_alarm.sa_mask);
+    handle_alarm.sa_handler = set_flag;
+    handle_alarm.sa_flags = 0;
+    ret = ret == 0 ?  sigaction(SIGALRM, &handle_alarm, &prev_sigaction) : ret;
+    if (ret < 0)
+    {
+	// Should only get here as a result of coding errors.
+	semsg(_(e_could_not_set_handler_for_timeout_str), strerror(errno));
+	return &timeout_flag;
+    }
+    timer_handler_active = TRUE;
+
+    // Set up the interval timer once the alarm handler is in place.
+    ret = setitimer(ITIMER_REAL, &interval, NULL);
+    if (ret < 0)
+    {
+	// Should only get here as a result of coding errors.
+	semsg(_(e_could_not_set_timeout_str), strerror(errno));
+	stop_timeout();
+	return &timeout_flag;
+    }
+
+    timer_active = TRUE;
+    return &timeout_flag;
+}
+# endif // HAVE_TIMER_CREATE
+#endif  // FEAT_RELTIME

@@ -809,7 +809,7 @@ static UINT timer_id = 0;
 #elif defined(FEAT_GUI_GTK)
 static gboolean timer_proc(gpointer);
 static guint timer_id = 0;
-#elif defined(FEAT_GUI_MOTIF) || defined(FEAT_GUI_ATHENA)
+#elif defined(FEAT_GUI_MOTIF)
 static void timer_proc(XtPointer, XtIntervalId *);
 static XtIntervalId timer_id = (XtIntervalId)0;
 #endif
@@ -845,7 +845,7 @@ timer_proc(HWND hwnd UNUSED, UINT uMsg UNUSED, UINT_PTR idEvent UNUSED, DWORD dw
 # elif defined(FEAT_GUI_GTK)
     static gboolean
 timer_proc(gpointer data UNUSED)
-# elif defined(FEAT_GUI_MOTIF) || defined(FEAT_GUI_ATHENA)
+# elif defined(FEAT_GUI_MOTIF)
     static void
 timer_proc(XtPointer timed_out UNUSED, XtIntervalId *interval_id UNUSED)
 # endif
@@ -853,7 +853,7 @@ timer_proc(XtPointer timed_out UNUSED, XtIntervalId *interval_id UNUSED)
     scheme_check_threads();
 # if defined(FEAT_GUI_GTK)
     return TRUE; // continue receiving notifications
-# elif defined(FEAT_GUI_MOTIF) || defined(FEAT_GUI_ATHENA)
+# elif defined(FEAT_GUI_MOTIF)
     // renew timeout
     if (mz_threads_allow && p_mzq > 0)
 	timer_id = XtAppAddTimeOut(app_context, p_mzq,
@@ -868,7 +868,7 @@ setup_timer(void)
     timer_id = SetTimer(NULL, 0, p_mzq, timer_proc);
 # elif defined(FEAT_GUI_GTK)
     timer_id = g_timeout_add((guint)p_mzq, (GSourceFunc)timer_proc, NULL);
-# elif defined(FEAT_GUI_MOTIF) || defined(FEAT_GUI_ATHENA)
+# elif defined(FEAT_GUI_MOTIF)
     timer_id = XtAppAddTimeOut(app_context, p_mzq, timer_proc, NULL);
 # endif
 }
@@ -880,7 +880,7 @@ remove_timer(void)
     KillTimer(NULL, timer_id);
 # elif defined(FEAT_GUI_GTK)
     g_source_remove(timer_id);
-# elif defined(FEAT_GUI_MOTIF) || defined(FEAT_GUI_ATHENA)
+# elif defined(FEAT_GUI_MOTIF)
     XtRemoveTimeOut(timer_id);
 # endif
     timer_id = 0;
@@ -1631,7 +1631,7 @@ vim_command(void *data, int argc, Scheme_Object **argv)
 
     // may be use do_cmdline_cmd?
     do_cmdline(BYTE_STRING_VALUE(cmd), NULL, NULL, DOCMD_NOWAIT|DOCMD_VERBOSE);
-    update_screen(VALID);
+    update_screen(UPD_VALID);
 
     MZ_GC_UNREG();
     raise_if_error();
@@ -1836,7 +1836,7 @@ set_option(void *data, int argc, Scheme_Object **argv)
     MZ_GC_UNREG();
     do_set(command, scope);
     vim_free(command);
-    update_screen(NOT_VALID);
+    update_screen(UPD_NOT_VALID);
     curbuf = save_curb;
     curwin = save_curw;
     raise_if_error();
@@ -2106,7 +2106,7 @@ set_cursor(void *data, int argc, Scheme_Object **argv)
     win->win->w_cursor.lnum = lnum;
     win->win->w_cursor.col = col;
     win->win->w_set_curswant = TRUE;
-    update_screen(VALID);
+    update_screen(UPD_VALID);
 
     raise_if_error();
     return scheme_void;
@@ -2781,7 +2781,7 @@ insert_buffer_line_list(void *data, int argc, Scheme_Object **argv)
 	}
 
 	curbuf = savebuf;
-	update_screen(VALID);
+	update_screen(UPD_VALID);
 
 	MZ_GC_UNREG();
 	raise_if_error();
@@ -2841,7 +2841,7 @@ insert_buffer_line_list(void *data, int argc, Scheme_Object **argv)
 	free_array(array);
 	MZ_GC_UNREG();
 	curbuf = savebuf;
-	update_screen(VALID);
+	update_screen(UPD_VALID);
     }
 
     MZ_GC_UNREG();

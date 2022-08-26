@@ -1,4 +1,4 @@
-" Tests for multi-line regexps with ":s".
+" Tests for the substitute (:s) command
 
 source shared.vim
 source check.vim
@@ -469,7 +469,6 @@ func Run_SubCmd_Tests(tests)
   for t in a:tests
     let start = line('.') + 1
     let end = start + len(t[2]) - 1
-    " TODO: why is there a one second delay the first time we get here?
     exe "normal o" . t[0]
     call cursor(start, 1)
     exe t[1]
@@ -504,7 +503,8 @@ func Test_sub_cmd_1()
 	      \ ['sSs', 's/S/\c/', ['scs']],
 	      \ ['tTt', "s/T/\<C-V>\<C-J>/", ["t\<C-V>\<C-J>t"]],
 	      \ ['U', 's/U/\L\uuUu\l\EU/', ['UuuU']],
-	      \ ['V', 's/V/\U\lVvV\u\Ev/', ['vVVv']]
+	      \ ['V', 's/V/\U\lVvV\u\Ev/', ['vVVv']],
+	      \ ['\', 's/\\/\\\\/', ['\\']]
 	      \ ]
   call Run_SubCmd_Tests(tests)
 endfunc
@@ -535,7 +535,8 @@ func Test_sub_cmd_2()
 	      \ ['sSs', 's/S/\c/', ['scs']],
 	      \ ['tTt', "s/T/\<C-V>\<C-J>/", ["t\<C-V>\<C-J>t"]],
 	      \ ['U', 's/U/\L\uuUu\l\EU/', ['UuuU']],
-	      \ ['V', 's/V/\U\lVvV\u\Ev/', ['vVVv']]
+	      \ ['V', 's/V/\U\lVvV\u\Ev/', ['vVVv']],
+	      \ ['\', 's/\\/\\\\/', ['\\']]
 	      \ ]
   call Run_SubCmd_Tests(tests)
 endfunc
@@ -690,10 +691,11 @@ func Test_nocatch_sub_failure_handling()
   endfunc
   new
   call setline(1, ['1 aaa', '2 aaa', '3 aaa'])
-  %s/aaa/\=Foo()/g
+  " need silent! to avoid a delay when entering Insert mode
+  silent! %s/aaa/\=Foo()/g
   call assert_equal(['1 0', '2 0', '3 0'], getline(1, 3))
 
-  " Trow without try-catch causes abort after the first line.
+  " Throw without try-catch causes abort after the first line.
   " We cannot test this, since it would stop executing the test script.
 
   " try/catch does not result in any changes
@@ -811,6 +813,10 @@ func Test_sub_vi_compatibility()
   s\&green&
   call assert_equal('amber green yellow white green', getline(1))
   close!
+
+  call assert_fails('vim9cmd s\/white/', 'E1270:')
+  call assert_fails('vim9cmd s\?white?', 'E1270:')
+  call assert_fails('vim9cmd s\&white&', 'E1270:')
 endfunc
 
 " Test for substitute with the new text longer than the original text
@@ -978,6 +984,389 @@ func Test_substitute_gdefault()
   call assert_equal(0, &gdefault)
 
   bw!
+endfunc
+
+" This was using "old_sub" after it was freed.
+func Test_using_old_sub()
+  set compatible maxfuncdepth=10
+  new
+  call setline(1, 'some text.')
+  func Repl()
+    ~
+    s/
+  endfunc
+  silent! s/\%')/\=Repl()
+
+  delfunc Repl
+  bwipe!
+  set nocompatible
+endfunc
+
+" This was switching windows in between computing the length and using it.
+func Test_sub_change_window()
+  silent! lfile
+  sil! norm o0000000000000000000000000000000000000000000000000000
+  func Repl()
+    lopen
+  endfunc
+  silent!  s/\%')/\=Repl()
+  bwipe!
+  bwipe!
+  delfunc Repl
+endfunc
+
+" This was undoign a change in between computing the length and using it.
+func Do_Test_sub_undo_change()
+  new
+  norm o0000000000000000000000000000000000000000000000000000
+  silent! s/\%')/\=Repl()
+  bwipe!
+endfunc
+
+func Test_sub_undo_change()
+  func Repl()
+    silent! norm g-
+  endfunc
+  call Do_Test_sub_undo_change()
+
+  func! Repl()
+    silent earlier
+  endfunc
+  call Do_Test_sub_undo_change()
+
+  delfunc Repl
+endfunc
+
+" This was opening a command line window from the expression
+func Test_sub_open_cmdline_win()
+  " the error only happens in a very specific setup, run a new Vim instance to
+  " get a clean starting point.
+  let lines =<< trim [SCRIPT]
+    set vb t_vb=
+    norm o0000000000000000000000000000000000000000000000000000
+    func Replace()
+      norm q/
+    endfunc
+    s/\%')/\=Replace()
+    redir >Xresult
+    messages
+    redir END
+    qall!
+  [SCRIPT]
+  call writefile(lines, 'Xscript')
+  if RunVim([], [], '-u NONE -S Xscript')
+    call assert_match('E565: Not allowed to change text or change window',
+          \ readfile('Xresult')->join('XX'))
+  endif
+
+  call delete('Xscript')
+  call delete('Xresult')
+endfunc
+
+" This was editing a script file from the expression
+func Test_sub_edit_scriptfile()
+  new
+  norm o0000000000000000000000000000000000000000000000000000
+  func EditScript()
+    silent! scr! Xfile
+  endfunc
+  s/\%')/\=EditScript()
+
+  delfunc EditScript
+  bwipe!
+endfunc
+
+" Test for the 2-letter and 3-letter :substitute commands
+func Test_substitute_short_cmd()
+  new
+  call setline(1, ['one', 'one one one'])
+  s/one/two
+  call cursor(2, 1)
+
+  " :sc
+  call feedkeys(":sc\<CR>y", 'xt')
+  call assert_equal('two one one', getline(2))
+
+  " :scg
+  call setline(2, 'one one one')
+  call feedkeys(":scg\<CR>nyq", 'xt')
+  call assert_equal('one two one', getline(2))
+
+  " :sci
+  call setline(2, 'ONE One onE')
+  call feedkeys(":sci\<CR>y", 'xt')
+  call assert_equal('two One onE', getline(2))
+
+  " :scI
+  set ignorecase
+  call setline(2, 'ONE One one')
+  call feedkeys(":scI\<CR>y", 'xt')
+  call assert_equal('ONE One two', getline(2))
+  set ignorecase&
+
+  " :scn
+  call setline(2, 'one one one')
+  let t = execute('scn')->split("\n")
+  call assert_equal(['1 match on 1 line'], t)
+  call assert_equal('one one one', getline(2))
+
+  " :scp
+  call setline(2, "\tone one one")
+  redir => output
+  call feedkeys(":scp\<CR>y", 'xt')
+  redir END
+  call assert_equal('        two one one', output->split("\n")[-1])
+  call assert_equal("\ttwo one one", getline(2))
+
+  " :scl
+  call setline(2, "\tone one one")
+  redir => output
+  call feedkeys(":scl\<CR>y", 'xt')
+  redir END
+  call assert_equal("^Itwo one one$", output->split("\n")[-1])
+  call assert_equal("\ttwo one one", getline(2))
+
+  " :sgc
+  call setline(2, 'one one one one one')
+  call feedkeys(":sgc\<CR>nyyq", 'xt')
+  call assert_equal('one two two one one', getline(2))
+
+  " :sg
+  call setline(2, 'one one one')
+  sg
+  call assert_equal('two two two', getline(2))
+
+  " :sgi
+  call setline(2, 'ONE One onE')
+  sgi
+  call assert_equal('two two two', getline(2))
+
+  " :sgI
+  set ignorecase
+  call setline(2, 'ONE One one')
+  sgI
+  call assert_equal('ONE One two', getline(2))
+  set ignorecase&
+
+  " :sgn
+  call setline(2, 'one one one')
+  let t = execute('sgn')->split("\n")
+  call assert_equal(['3 matches on 1 line'], t)
+  call assert_equal('one one one', getline(2))
+
+  " :sgp
+  call setline(2, "\tone one one")
+  redir => output
+  sgp
+  redir END
+  call assert_equal('        two two two', output->split("\n")[-1])
+  call assert_equal("\ttwo two two", getline(2))
+
+  " :sgl
+  call setline(2, "\tone one one")
+  redir => output
+  sgl
+  redir END
+  call assert_equal("^Itwo two two$", output->split("\n")[-1])
+  call assert_equal("\ttwo two two", getline(2))
+
+  " :sgr
+  call setline(2, "one one one")
+  call cursor(2, 1)
+  s/abc/xyz/e
+  let @/ = 'one'
+  sgr
+  call assert_equal('xyz xyz xyz', getline(2))
+
+  " :sic
+  call cursor(1, 1)
+  s/one/two/e
+  call setline(2, "ONE One one")
+  call cursor(2, 1)
+  call feedkeys(":sic\<CR>y", 'xt')
+  call assert_equal('two One one', getline(2))
+
+  " :si
+  call setline(2, "ONE One one")
+  si
+  call assert_equal('two One one', getline(2))
+
+  " :siI
+  call setline(2, "ONE One one")
+  siI
+  call assert_equal('ONE One two', getline(2))
+
+  " :sin
+  call setline(2, 'ONE One onE')
+  let t = execute('sin')->split("\n")
+  call assert_equal(['1 match on 1 line'], t)
+  call assert_equal('ONE One onE', getline(2))
+
+  " :sip
+  call setline(2, "\tONE One onE")
+  redir => output
+  sip
+  redir END
+  call assert_equal('        two One onE', output->split("\n")[-1])
+  call assert_equal("\ttwo One onE", getline(2))
+
+  " :sir
+  call setline(2, "ONE One onE")
+  call cursor(2, 1)
+  s/abc/xyz/e
+  let @/ = 'one'
+  sir
+  call assert_equal('xyz One onE', getline(2))
+
+  " :sIc
+  call cursor(1, 1)
+  s/one/two/e
+  call setline(2, "ONE One one")
+  call cursor(2, 1)
+  call feedkeys(":sIc\<CR>y", 'xt')
+  call assert_equal('ONE One two', getline(2))
+
+  " :sIg
+  call setline(2, "ONE one onE one")
+  sIg
+  call assert_equal('ONE two onE two', getline(2))
+
+  " :sIi
+  call setline(2, "ONE One one")
+  sIi
+  call assert_equal('two One one', getline(2))
+
+  " :sI
+  call setline(2, "ONE One one")
+  sI
+  call assert_equal('ONE One two', getline(2))
+
+  " :sIn
+  call setline(2, 'ONE One one')
+  let t = execute('sIn')->split("\n")
+  call assert_equal(['1 match on 1 line'], t)
+  call assert_equal('ONE One one', getline(2))
+
+  " :sIp
+  call setline(2, "\tONE One one")
+  redir => output
+  sIp
+  redir END
+  call assert_equal('        ONE One two', output->split("\n")[-1])
+  call assert_equal("\tONE One two", getline(2))
+
+  " :sIl
+  call setline(2, "\tONE onE one")
+  redir => output
+  sIl
+  redir END
+  call assert_equal("^IONE onE two$", output->split("\n")[-1])
+  call assert_equal("\tONE onE two", getline(2))
+
+  " :sIr
+  call setline(2, "ONE one onE")
+  call cursor(2, 1)
+  s/abc/xyz/e
+  let @/ = 'one'
+  sIr
+  call assert_equal('ONE xyz onE', getline(2))
+
+  " :src
+  call setline(2, "ONE one one")
+  call cursor(2, 1)
+  s/abc/xyz/e
+  let @/ = 'one'
+  call feedkeys(":src\<CR>y", 'xt')
+  call assert_equal('ONE xyz one', getline(2))
+
+  " :srg
+  call setline(2, "one one one")
+  call cursor(2, 1)
+  s/abc/xyz/e
+  let @/ = 'one'
+  srg
+  call assert_equal('xyz xyz xyz', getline(2))
+
+  " :sri
+  call setline(2, "ONE one onE")
+  call cursor(2, 1)
+  s/abc/xyz/e
+  let @/ = 'one'
+  sri
+  call assert_equal('xyz one onE', getline(2))
+
+  " :srI
+  call setline(2, "ONE one onE")
+  call cursor(2, 1)
+  s/abc/xyz/e
+  let @/ = 'one'
+  srI
+  call assert_equal('ONE xyz onE', getline(2))
+
+  " :srn
+  call setline(2, "ONE one onE")
+  call cursor(2, 1)
+  s/abc/xyz/e
+  let @/ = 'one'
+  let t = execute('srn')->split("\n")
+  call assert_equal(['1 match on 1 line'], t)
+  call assert_equal('ONE one onE', getline(2))
+
+  " :srp
+  call setline(2, "\tONE one onE")
+  call cursor(2, 1)
+  s/abc/xyz/e
+  let @/ = 'one'
+  redir => output
+  srp
+  redir END
+  call assert_equal('        ONE xyz onE', output->split("\n")[-1])
+  call assert_equal("\tONE xyz onE", getline(2))
+
+  " :srl
+  call setline(2, "\tONE one onE")
+  call cursor(2, 1)
+  s/abc/xyz/e
+  let @/ = 'one'
+  redir => output
+  srl
+  redir END
+  call assert_equal("^IONE xyz onE$", output->split("\n")[-1])
+  call assert_equal("\tONE xyz onE", getline(2))
+
+  " :sr
+  call setline(2, "ONE one onE")
+  call cursor(2, 1)
+  s/abc/xyz/e
+  let @/ = 'one'
+  sr
+  call assert_equal('ONE xyz onE', getline(2))
+
+  " :sce
+  s/abc/xyz/e
+  call assert_fails("sc", 'E486:')
+  sce
+  " :sge
+  call assert_fails("sg", 'E486:')
+  sge
+  " :sie
+  call assert_fails("si", 'E486:')
+  sie
+  " :sIe
+  call assert_fails("sI", 'E486:')
+  sIe
+
+  bw!
+endfunc
+
+" This should be done last to reveal a memory leak when vim_regsub_both() is
+" called to evaluate an expression but it is not used in a second call.
+func Test_z_substitute_expr_leak()
+  func SubExpr()
+    ~n
+  endfunc
+  silent! s/\%')/\=SubExpr()
+  delfunc SubExpr
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

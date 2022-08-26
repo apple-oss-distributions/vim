@@ -132,6 +132,12 @@ sk.cp1250.po: sk.po
 	iconv -f iso-8859-2 -t cp1250 sk.po | \
 		sed -e 's/charset=ISO-8859-2/charset=cp1250/' -e 's/# Original translations/# Generated from sk.po, DO NOT EDIT/' > sk.cp1250.po
 
+# Convert zh_CN.UTF-8.po to create zh_CN.po.
+zh_CN.po: zh_CN.UTF-8.po
+	rm -f zh_CN.po
+	iconv -f UTF-8 -t gb2312 zh_CN.UTF-8.po | \
+		sed -e 's/charset=[uU][tT][fF]-8/charset=gb2312/' -e 's/# Original translations/# Generated from zh_CN.UTF-8.po, DO NOT EDIT/' > zh_CN.po
+
 # Convert zh_CN.UTF-8.po to create zh_CN.cp936.po.
 # Set 'charset' to gbk to avoid that msfmt generates a warning.
 # This used to convert from zh_CN.po, but that results in a conversion error.
@@ -214,7 +220,9 @@ vim.desktop: vim.desktop.in $(POFILES)
 	if command -v desktop-file-validate; then desktop-file-validate tmp_vim.desktop; fi
 	mv tmp_vim.desktop vim.desktop
 
-gvim.desktop: gvim.desktop.in $(POFILES)
+# The dependency on vim.desktop is only to avoid the two targets are build at
+# the same time, which causes a race for the LINGUAS file.
+gvim.desktop: gvim.desktop.in $(POFILES) vim.desktop
 	echo $(LANGUAGES) | tr " " "\n" |sed -e '/\./d' | sort > LINGUAS
 	$(MSGFMT) --desktop -d . --template gvim.desktop.in -o tmp_gvim.desktop
 	rm -f LINGUAS

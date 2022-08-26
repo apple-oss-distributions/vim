@@ -411,6 +411,36 @@ func Test_clipboard_regs()
   bwipe!
 endfunc
 
+" Test unnamed for both clipboard registers (* and +)
+func Test_clipboard_regs_both_unnamed()
+  CheckNotGui
+  CheckFeature clipboard_working
+  CheckTwoClipboards
+
+  let @* = 'xxx'
+  let @+ = 'xxx'
+
+  new
+
+  set clipboard=unnamed,unnamedplus
+  call setline(1, ['foo', 'bar'])
+
+  " op_yank copies to both
+  :1
+  :normal yw
+  call assert_equal('foo', getreg('*'))
+  call assert_equal('foo', getreg('+'))
+
+  " op_delete only copies to '+'
+  :2
+  :normal dw
+  call assert_equal('foo', getreg('*'))
+  call assert_equal('bar', getreg('+'))
+
+  set clipboard&vim
+  bwipe!
+endfunc
+
 " Test for restarting the current mode (insert or virtual replace) after
 " executing the contents of a register
 func Test_put_reg_restart_mode()
@@ -736,6 +766,65 @@ func Test_record_in_insert_mode()
   call setline(1, ['foo'])
   call feedkeys("i\<C-O>qrbaz\<C-O>q", 'xt')
   call assert_equal('baz', @r)
+  bwipe!
+endfunc
+
+func Test_record_in_select_mode()
+  new
+  call setline(1, 'text')
+  sil norm q00
+  sil norm q
+  call assert_equal('0ext', getline(1))
+
+  %delete
+  let @r = ''
+  call setline(1, ['abc', 'abc', 'abc'])
+  smap <F2> <Right><Right>,
+  call feedkeys("qrgh\<F2>Dk\<Esc>q", 'xt')
+  call assert_equal("gh\<F2>Dk\<Esc>", @r)
+  norm j0@rj0@@
+  call assert_equal([',Dk', ',Dk', ',Dk'], getline(1, 3))
+  sunmap <F2>
+
+  bwipe!
+endfunc
+
+" mapping that ends macro recording should be removed from recorded macro
+func Test_end_record_using_mapping()
+  call setline(1, 'aaa')
+  nnoremap s q
+  call feedkeys('safas', 'tx')
+  call assert_equal('fa', @a)
+  nunmap s
+
+  nnoremap xx q
+  call feedkeys('0xxafaxx', 'tx')
+  call assert_equal('fa', @a)
+  nunmap xx
+
+  nnoremap xsx q
+  call feedkeys('0qafaxsx', 'tx')
+  call assert_equal('fa', @a)
+  nunmap xsx
+
+  bwipe!
+endfunc
+
+func Test_end_reg_executing()
+  nnoremap s <Nop>
+  let @a = 's'
+  call feedkeys("@aqaq\<Esc>", 'tx')
+  call assert_equal('', @a)
+  call assert_equal('', getline(1))
+
+  call setline(1, 'aaa')
+  nnoremap s qa
+  let @a = 'fa'
+  call feedkeys("@asq\<Esc>", 'tx')
+  call assert_equal('', @a)
+  call assert_equal('aaa', getline(1))
+
+  nunmap s
   bwipe!
 endfunc
 

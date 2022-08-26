@@ -48,6 +48,28 @@ func Test_isfname()
   set isfname&
 endfunc
 
+" Test for getting the value of 'pastetoggle'
+func Test_pastetoggle()
+  " character with K_SPECIAL byte
+  let &pastetoggle = '…'
+  call assert_equal('…', &pastetoggle)
+  call assert_equal("\n  pastetoggle=…", execute('set pastetoggle?'))
+
+  " modified character with K_SPECIAL byte
+  let &pastetoggle = '<M-…>'
+  call assert_equal('<M-…>', &pastetoggle)
+  call assert_equal("\n  pastetoggle=<M-…>", execute('set pastetoggle?'))
+
+  " illegal bytes
+  let str = ":\x7f:\x80:\x90:\xd0:"
+  let &pastetoggle = str
+  call assert_equal(str, &pastetoggle)
+  call assert_equal("\n  pastetoggle=" .. strtrans(str), execute('set pastetoggle?'))
+
+  unlet str
+  set pastetoggle&
+endfunc
+
 func Test_wildchar()
   " Empty 'wildchar' used to access invalid memory.
   call assert_fails('set wildchar=', 'E521:')
@@ -368,6 +390,9 @@ func Test_set_errors()
   call assert_fails('set shiftwidth=-1', 'E487:')
   call assert_fails('set sidescroll=-1', 'E487:')
   call assert_fails('set tabstop=-1', 'E487:')
+  call assert_fails('set tabstop=10000', 'E474:')
+  call assert_fails('let &tabstop = 10000', 'E474:')
+  call assert_fails('set tabstop=5500000000', 'E474:')
   call assert_fails('set textwidth=-1', 'E487:')
   call assert_fails('set timeoutlen=-1', 'E487:')
   call assert_fails('set updatecount=-1', 'E487:')
@@ -382,14 +407,23 @@ func Test_set_errors()
   call assert_fails('set comments=a', 'E525:')
   call assert_fails('set foldmarker=x', 'E536:')
   call assert_fails('set commentstring=x', 'E537:')
+  call assert_fails('let &commentstring = "x"', 'E537:')
   call assert_fails('set complete=x', 'E539:')
   call assert_fails('set rulerformat=%-', 'E539:')
   call assert_fails('set rulerformat=%(', 'E542:')
   call assert_fails('set rulerformat=%15(%%', 'E542:')
   call assert_fails('set statusline=%$', 'E539:')
   call assert_fails('set statusline=%{', 'E540:')
+  call assert_fails('set statusline=%{%', 'E540:')
+  call assert_fails('set statusline=%{%}', 'E539:')
   call assert_fails('set statusline=%(', 'E542:')
   call assert_fails('set statusline=%)', 'E542:')
+  call assert_fails('set tabline=%$', 'E539:')
+  call assert_fails('set tabline=%{', 'E540:')
+  call assert_fails('set tabline=%{%', 'E540:')
+  call assert_fails('set tabline=%{%}', 'E539:')
+  call assert_fails('set tabline=%(', 'E542:')
+  call assert_fails('set tabline=%)', 'E542:')
 
   if has('cursorshape')
     " This invalid value for 'guicursor' used to cause Vim to crash.
@@ -432,15 +466,48 @@ func Test_set_errors()
   call assert_fails('set sessionoptions=curdir,sesdir', 'E474:')
   call assert_fails('set foldmarker={{{,', 'E474:')
   call assert_fails('set sessionoptions=sesdir,curdir', 'E474:')
-  call assert_fails('set listchars=trail:· ambiwidth=double', 'E834:')
+  setlocal listchars=trail:·
+  call assert_fails('set ambiwidth=double', 'E834:')
+  setlocal listchars=trail:-
+  setglobal listchars=trail:·
+  call assert_fails('set ambiwidth=double', 'E834:')
   set listchars&
-  call assert_fails('set fillchars=stl:· ambiwidth=double', 'E835:')
+  setlocal fillchars=stl:·
+  call assert_fails('set ambiwidth=double', 'E835:')
+  setlocal fillchars=stl:-
+  setglobal fillchars=stl:·
+  call assert_fails('set ambiwidth=double', 'E835:')
   set fillchars&
   call assert_fails('set fileencoding=latin1,utf-8', 'E474:')
   set nomodifiable
   call assert_fails('set fileencoding=latin1', 'E21:')
   set modifiable&
   call assert_fails('set t_#-&', 'E522:')
+endfunc
+
+func Test_set_encoding()
+  let save_encoding = &encoding
+
+  set enc=iso8859-1
+  call assert_equal('latin1', &enc)
+  set enc=iso8859_1
+  call assert_equal('latin1', &enc)
+  set enc=iso-8859-1
+  call assert_equal('latin1', &enc)
+  set enc=iso_8859_1
+  call assert_equal('latin1', &enc)
+  set enc=iso88591
+  call assert_equal('latin1', &enc)
+  set enc=iso8859
+  call assert_equal('latin1', &enc)
+  set enc=iso-8859
+  call assert_equal('latin1', &enc)
+  set enc=iso_8859
+  call assert_equal('latin1', &enc)
+  call assert_fails('set enc=iso8858', 'E474:')
+  call assert_equal('latin1', &enc)
+
+  let &encoding = save_encoding
 endfunc
 
 func CheckWasSet(name)
@@ -842,7 +909,6 @@ endfunc
 func Test_rightleftcmd()
   CheckFeature rightleft
   set rightleft
-  set rightleftcmd
 
   let g:l = []
   func AddPos()
@@ -851,6 +917,13 @@ func Test_rightleftcmd()
   endfunc
   cmap <expr> <F2> AddPos()
 
+  set rightleftcmd=
+  call feedkeys("/\<F2>abc\<Right>\<F2>\<Left>\<Left>\<F2>" ..
+        \ "\<Right>\<F2>\<Esc>", 'xt')
+  call assert_equal([2, 5, 3, 4], g:l)
+
+  let g:l = []
+  set rightleftcmd=search
   call feedkeys("/\<F2>abc\<Left>\<F2>\<Right>\<Right>\<F2>" ..
         \ "\<Left>\<F2>\<Esc>", 'xt')
   call assert_equal([&co - 1, &co - 4, &co - 2, &co - 3], g:l)
@@ -861,17 +934,21 @@ func Test_rightleftcmd()
   set rightleft&
 endfunc
 
-" Test for the "debug" option
+" Test for the 'debug' option
 func Test_debug_option()
+  " redraw to avoid matching previous messages
+  redraw
   set debug=beep
   exe "normal \<C-c>"
   call assert_equal('Beep!', Screenline(&lines))
+  call assert_equal('line    4:', Screenline(&lines - 1))
+  " only match the final colon in the line that shows the source
+  call assert_match(':$', Screenline(&lines - 2))
   set debug&
 endfunc
 
 " Test for the default CDPATH option
 func Test_opt_default_cdpath()
-  CheckFeature file_in_path
   let after =<< trim [CODE]
     call assert_equal(',/path/to/dir1,/path/to/dir2', &cdpath)
     call writefile(v:errors, 'Xtestout')
@@ -898,6 +975,18 @@ func Test_opt_set_keycode()
   set <F9>=xyz
   call assert_equal('xyz', &t_k9)
   set <t_k9>&
+
+  " should we test all of them?
+  set t_Ce=testCe
+  set t_Cs=testCs
+  set t_Us=testUs
+  set t_ds=testds
+  set t_Ds=testDs
+  call assert_equal('testCe', &t_Ce)
+  call assert_equal('testCs', &t_Cs)
+  call assert_equal('testUs', &t_Us)
+  call assert_equal('testds', &t_ds)
+  call assert_equal('testDs', &t_Ds)
 endfunc
 
 " Test for changing options in a sandbox
@@ -1218,6 +1307,39 @@ func Test_opt_cdhome()
   call assert_equal(path, getcwd())
 
   set cdhome&
+endfunc
+
+func Test_set_completion_2()
+  CheckOption termguicolors
+
+  " Test default option completion
+  set wildoptions=
+  call feedkeys(":set termg\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"set termguicolors', @:)
+
+  call feedkeys(":set notermg\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"set notermguicolors', @:)
+
+  " Test fuzzy option completion
+  set wildoptions=fuzzy
+  call feedkeys(":set termg\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"set termguicolors termencoding', @:)
+
+  call feedkeys(":set notermg\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"set notermguicolors', @:)
+
+  set wildoptions=
+endfunc
+
+func Test_switchbuf_reset()
+  set switchbuf=useopen
+  sblast
+  call assert_equal(1, winnr('$'))
+  set all&
+  call assert_equal('', &switchbuf)
+  sblast
+  call assert_equal(2, winnr('$'))
+  only!
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

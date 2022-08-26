@@ -34,7 +34,7 @@ struct bw_info
     int		bw_flags;	// FIO_ flags
 #ifdef FEAT_CRYPT
     buf_T	*bw_buffer;	// buffer being written
-    int         bw_finish;      // finish encrypting
+    int		bw_finish;	// finish encrypting
 #endif
     char_u	bw_rest[CONV_RESTLEN]; // not converted bytes
     int		bw_restlen;	// nr of bytes in bw_rest[]
@@ -43,7 +43,7 @@ struct bw_info
     size_t	bw_conv_buflen; // size of bw_conv_buf
     int		bw_conv_error;	// set for conversion error
     linenr_T	bw_conv_error_lnum;  // first line with error or zero
-    linenr_T	bw_start_lnum;  // line number at start of buffer
+    linenr_T	bw_start_lnum;	// line number at start of buffer
 #ifdef USE_ICONV
     iconv_t	bw_iconv_fd;	// descriptor for iconv() or -1
 #endif
@@ -749,9 +749,7 @@ buf_write(
 	    && reset_changed
 	    && whole
 	    && buf == curbuf
-#ifdef FEAT_QUICKFIX
 	    && !bt_nofilename(buf)
-#endif
 	    && !filtering
 	    && (!append || vim_strchr(p_cpo, CPO_FNAMEAPP) != NULL)
 	    && vim_strchr(p_cpo, CPO_FNAMEW) != NULL)
@@ -820,11 +818,9 @@ buf_write(
 	    if (!(did_cmd = apply_autocmds_exarg(EVENT_FILEAPPENDCMD,
 					 sfname, sfname, FALSE, curbuf, eap)))
 	    {
-#ifdef FEAT_QUICKFIX
 		if (overwriting && bt_nofilename(curbuf))
 		    nofile_err = TRUE;
 		else
-#endif
 		    apply_autocmds_exarg(EVENT_FILEAPPENDPRE,
 					  sfname, sfname, FALSE, curbuf, eap);
 	    }
@@ -853,11 +849,9 @@ buf_write(
 	    }
 	    else
 	    {
-#ifdef FEAT_QUICKFIX
 		if (overwriting && bt_nofilename(curbuf))
 		    nofile_err = TRUE;
 		else
-#endif
 		    apply_autocmds_exarg(EVENT_BUFWRITEPRE,
 					  sfname, sfname, FALSE, curbuf, eap);
 	    }
@@ -867,11 +861,9 @@ buf_write(
 	    if (!(did_cmd = apply_autocmds_exarg(EVENT_FILEWRITECMD,
 					 sfname, sfname, FALSE, curbuf, eap)))
 	    {
-#ifdef FEAT_QUICKFIX
 		if (overwriting && bt_nofilename(curbuf))
 		    nofile_err = TRUE;
 		else
-#endif
 		    apply_autocmds_exarg(EVENT_FILEWRITEPRE,
 					  sfname, sfname, FALSE, curbuf, eap);
 	    }
@@ -1222,14 +1214,22 @@ buf_write(
 		// First find a file name that doesn't exist yet (use some
 		// arbitrary numbers).
 		STRCPY(IObuff, fname);
+		fd = -1;
 		for (i = 4913; ; i += 123)
 		{
 		    sprintf((char *)gettail(IObuff), "%d", i);
 		    if (mch_lstat((char *)IObuff, &st) < 0)
-			break;
-		}
-		fd = mch_open((char *)IObuff,
+		    {
+			fd = mch_open((char *)IObuff,
 				    O_CREAT|O_WRONLY|O_EXCL|O_NOFOLLOW, perm);
+			if (fd < 0 && errno == EEXIST)
+			    // If the same file name is created by another
+			    // process between lstat() and open(), find another
+			    // name.
+			    continue;
+			break;
+		    }
+		}
 		if (fd < 0)	// can't write in directory
 		    backup_copy = TRUE;
 		else

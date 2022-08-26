@@ -25,11 +25,17 @@
  * following names, separated by commas (but no spaces!).
  */
 static char *(hl_name_table[]) =
-    {"bold", "standout", "underline", "undercurl",
-      "italic", "reverse", "inverse", "nocombine", "strikethrough", "NONE"};
+    {"bold", "standout", "underline",
+	"undercurl", "underdouble", "underdotted", "underdashed",
+	"italic", "reverse", "inverse", "nocombine", "strikethrough", "NONE"};
 static int hl_attr_table[] =
-    {HL_BOLD, HL_STANDOUT, HL_UNDERLINE, HL_UNDERCURL, HL_ITALIC, HL_INVERSE, HL_INVERSE, HL_NOCOMBINE, HL_STRIKETHROUGH, 0};
-#define ATTR_COMBINE(attr_a, attr_b) ((((attr_b) & HL_NOCOMBINE) ? attr_b : (attr_a)) | (attr_b))
+    {HL_BOLD, HL_STANDOUT, HL_UNDERLINE,
+	HL_UNDERCURL, HL_UNDERDOUBLE, HL_UNDERDOTTED, HL_UNDERDASHED,
+	HL_ITALIC, HL_INVERSE, HL_INVERSE, HL_NOCOMBINE, HL_STRIKETHROUGH, 0};
+// length of all attribute names, plus commas, together (and a bit more)
+#define MAX_ATTR_LEN 120
+
+#define ATTR_COMBINE(attr_a, attr_b) ((((attr_b) & HL_NOCOMBINE) ? (attr_b) : (attr_a)) | (attr_b))
 
 /*
  * Structure that stores information about a highlight group.
@@ -157,6 +163,7 @@ static char *(highlight_init_both[]) = {
     "default link QuickFixLine Search",
     "default link CursorLineSign SignColumn",
     "default link CursorLineFold FoldColumn",
+    "default link CurSearch Search",
     CENT("Normal cterm=NONE", "Normal gui=NONE"),
     NULL
 };
@@ -565,7 +572,7 @@ static int color_numbers_8[28] = {0, 4, 2, 6,
  * "boldp" will be set to TRUE or FALSE for a foreground color when using 8
  * colors, otherwise it will be unchanged.
  */
-    int
+    static int
 lookup_color(int idx, int foreground, int *boldp)
 {
     int		color = color_numbers_16[idx];
@@ -689,7 +696,7 @@ highlight_group_link(
 	    hlgroup->sg_script_ctx.sc_lnum += SOURCING_LNUM;
 #endif
 	    hlgroup->sg_cleared = FALSE;
-	    redraw_all_later(SOME_VALID);
+	    redraw_all_later(UPD_SOME_VALID);
 
 	    // Only call highlight_changed() once after multiple changes.
 	    need_highlight_changed = TRUE;
@@ -718,7 +725,7 @@ highlight_reset_all(void)
 # ifdef FEAT_BEVAL_TIP
 	gui_init_tooltip_font();
 # endif
-# if defined(FEAT_MENU) && (defined(FEAT_GUI_ATHENA) || defined(FEAT_GUI_MOTIF))
+# if defined(FEAT_MENU) && defined(FEAT_GUI_MOTIF)
 	gui_init_menu_font();
 # endif
     }
@@ -932,7 +939,7 @@ highlight_set_ctermfg(int idx, int color, int is_normal_group)
 	if (!gui.in_use && !gui.starting)
 #endif
 	{
-	    must_redraw = CLEAR;
+	    set_must_redraw(UPD_CLEAR);
 	    if (termcap_active && color >= 0)
 		term_fg_color(color);
 	}
@@ -955,7 +962,7 @@ highlight_set_ctermbg(int idx, int color, int is_normal_group)
 	if (!gui.in_use && !gui.starting)
 #endif
 	{
-	    must_redraw = CLEAR;
+	    set_must_redraw(UPD_CLEAR);
 	    if (color >= 0)
 	    {
 		int dark = -1;
@@ -973,8 +980,8 @@ highlight_set_ctermbg(int idx, int color, int is_normal_group)
 			&& dark != (*p_bg == 'd')
 			&& !option_was_set((char_u *)"bg"))
 		{
-		    set_option_value((char_u *)"bg", 0L,
-			    (char_u *)(dark ? "dark" : "light"), 0);
+		    set_option_value_give_err((char_u *)"bg",
+				   0L, (char_u *)(dark ? "dark" : "light"), 0);
 		    reset_option_was_set((char_u *)"bg");
 		}
 	    }
@@ -998,7 +1005,7 @@ highlight_set_ctermul(int idx, int color, int is_normal_group)
 	if (!gui.in_use && !gui.starting)
 #endif
 	{
-	    must_redraw = CLEAR;
+	    set_must_redraw(UPD_CLEAR);
 	    if (termcap_active && color >= 0)
 		term_ul_color(color);
 	}
@@ -1355,7 +1362,7 @@ highlight_set_startstop_termcode(int idx, char_u *key, char_u *arg, int init)
 	// Copy characters from arg[] to buf[], translating <> codes.
 	for (p = arg, off = 0; off < 100 - 6 && *p; )
 	{
-	    len = trans_special(&p, buf + off, FSK_SIMPLIFY, NULL);
+	    len = trans_special(&p, buf + off, FSK_SIMPLIFY, FALSE, NULL);
 	    if (len > 0)	    // recognized special char
 		off += len;
 	    else		    // copy as normal char
@@ -1718,7 +1725,7 @@ do_highlight(
 	    {
 		highlight_gui_started();
 		did_highlight_changed = TRUE;
-		redraw_all_later(NOT_VALID);
+		redraw_all_later(UPD_NOT_VALID);
 	    }
 #endif
 #ifdef FEAT_VTP
@@ -1772,7 +1779,7 @@ do_highlight(
 	// redrawing.  This may happen when evaluating 'statusline' changes the
 	// StatusLine group.
 	if (!updating_screen)
-	    redraw_all_later(NOT_VALID);
+	    redraw_all_later(UPD_NOT_VALID);
 	need_highlight_changed = TRUE;
     }
 }
@@ -1912,7 +1919,7 @@ set_normal_colors(void)
 				 FALSE, TRUE, FALSE))
 	{
 	    gui_mch_new_colors();
-	    must_redraw = CLEAR;
+	    set_must_redraw(UPD_CLEAR);
 	}
 #  ifdef FEAT_GUI_X11
 	if (set_group_colors((char_u *)"Menu",
@@ -1922,7 +1929,7 @@ set_normal_colors(void)
 #   ifdef FEAT_MENU
 	    gui_mch_new_menu_colors();
 #   endif
-	    must_redraw = CLEAR;
+	    set_must_redraw(UPD_CLEAR);
 	}
 #   ifdef FEAT_BEVAL_GUI
 	if (set_group_colors((char_u *)"Tooltip",
@@ -1932,7 +1939,7 @@ set_normal_colors(void)
 #    ifdef FEAT_TOOLBAR
 	    gui_mch_new_tooltip_colors();
 #    endif
-	    must_redraw = CLEAR;
+	    set_must_redraw(UPD_CLEAR);
 	}
 #   endif
 	if (set_group_colors((char_u *)"Scrollbar",
@@ -1940,7 +1947,7 @@ set_normal_colors(void)
 			FALSE, FALSE, FALSE))
 	{
 	    gui_new_scrollbar_colors();
-	    must_redraw = CLEAR;
+	    set_must_redraw(UPD_CLEAR);
 	}
 #  endif
     }
@@ -1966,7 +1973,7 @@ set_normal_colors(void)
 		// color
 		cterm_normal_fg_gui_color = HL_TABLE()[idx].sg_gui_fg;
 		cterm_normal_bg_gui_color = HL_TABLE()[idx].sg_gui_bg;
-		must_redraw = CLEAR;
+		set_must_redraw(UPD_CLEAR);
 	    }
 	}
     }
@@ -2134,7 +2141,7 @@ hl_do_font(
 	|| do_menu
 #  endif
 #  ifdef FEAT_BEVAL_TIP
-	// In Athena & Motif, the Tooltip highlight group is always a fontset
+	// In Motif, the Tooltip highlight group is always a fontset
 	|| do_tooltip
 #  endif
 	    )
@@ -2156,7 +2163,7 @@ hl_do_font(
 	// fontset.  Same for the Menu group.
 	if (do_normal)
 	    gui_init_font(arg, TRUE);
-#   if (defined(FEAT_GUI_MOTIF) || defined(FEAT_GUI_ATHENA)) && defined(FEAT_MENU)
+#   if defined(FEAT_GUI_MOTIF) && defined(FEAT_MENU)
 	if (do_menu)
 	{
 #    ifdef FONTSET_ALWAYS
@@ -2170,7 +2177,7 @@ hl_do_font(
 #    ifdef FEAT_BEVAL_GUI
 	if (do_tooltip)
 	{
-	    // The Athena widget set cannot currently handle switching between
+	    // The Athena widget set could not handle switching between
 	    // displaying a single font and a fontset.
 	    // If the XtNinternational resource is set to True at widget
 	    // creation, then a fontset is always used, otherwise an
@@ -2194,7 +2201,7 @@ hl_do_font(
 	    if (do_normal)
 		gui_init_font(arg, FALSE);
 #ifndef FONTSET_ALWAYS
-# if (defined(FEAT_GUI_MOTIF) || defined(FEAT_GUI_ATHENA)) && defined(FEAT_MENU)
+# if defined(FEAT_GUI_MOTIF) && defined(FEAT_MENU)
 	    if (do_menu)
 	    {
 		gui.menu_font = HL_TABLE()[idx].sg_font;
@@ -2260,7 +2267,7 @@ color_name2handle(char_u *name)
 #  undef RGB
 # endif
 # ifndef RGB
-#  define RGB(r, g, b)	((r<<16) | (g<<8) | (b))
+#  define RGB(r, g, b)	(((r)<<16) | ((g)<<8) | (b))
 # endif
 
 # ifdef VIMDLL
@@ -2355,7 +2362,7 @@ colorname2rgb(char_u *name)
     guicolor_T
 gui_get_color_cmn(char_u *name)
 {
-    int         i;
+    int		i;
     guicolor_T  color;
 
     struct rgbcolor_table_S {
@@ -2538,7 +2545,7 @@ get_attr_entry(garray_T *table, attrentry_T *aep)
 
 	clear_hl_tables();
 
-	must_redraw = CLEAR;
+	set_must_redraw(UPD_CLEAR);
 
 	for (i = 0; i < highlight_ga.ga_len; ++i)
 	    set_hl_attr(i);
@@ -2697,7 +2704,7 @@ clear_hl_tables(void)
 hl_combine_attr(int char_attr, int prim_attr)
 {
     attrentry_T *char_aep = NULL;
-    attrentry_T *spell_aep;
+    attrentry_T *prim_aep;
     attrentry_T new_en;
 
     if (char_attr == 0)
@@ -2725,22 +2732,22 @@ hl_combine_attr(int char_attr, int prim_attr)
 	    new_en.ae_attr = ATTR_COMBINE(new_en.ae_attr, prim_attr);
 	else
 	{
-	    spell_aep = syn_gui_attr2entry(prim_attr);
-	    if (spell_aep != NULL)
+	    prim_aep = syn_gui_attr2entry(prim_attr);
+	    if (prim_aep != NULL)
 	    {
 		new_en.ae_attr = ATTR_COMBINE(new_en.ae_attr,
-							   spell_aep->ae_attr);
-		if (spell_aep->ae_u.gui.fg_color != INVALCOLOR)
-		    new_en.ae_u.gui.fg_color = spell_aep->ae_u.gui.fg_color;
-		if (spell_aep->ae_u.gui.bg_color != INVALCOLOR)
-		    new_en.ae_u.gui.bg_color = spell_aep->ae_u.gui.bg_color;
-		if (spell_aep->ae_u.gui.sp_color != INVALCOLOR)
-		    new_en.ae_u.gui.sp_color = spell_aep->ae_u.gui.sp_color;
-		if (spell_aep->ae_u.gui.font != NOFONT)
-		    new_en.ae_u.gui.font = spell_aep->ae_u.gui.font;
+							   prim_aep->ae_attr);
+		if (prim_aep->ae_u.gui.fg_color != INVALCOLOR)
+		    new_en.ae_u.gui.fg_color = prim_aep->ae_u.gui.fg_color;
+		if (prim_aep->ae_u.gui.bg_color != INVALCOLOR)
+		    new_en.ae_u.gui.bg_color = prim_aep->ae_u.gui.bg_color;
+		if (prim_aep->ae_u.gui.sp_color != INVALCOLOR)
+		    new_en.ae_u.gui.sp_color = prim_aep->ae_u.gui.sp_color;
+		if (prim_aep->ae_u.gui.font != NOFONT)
+		    new_en.ae_u.gui.font = prim_aep->ae_u.gui.font;
 # ifdef FEAT_XFONTSET
-		if (spell_aep->ae_u.gui.fontset != NOFONTSET)
-		    new_en.ae_u.gui.fontset = spell_aep->ae_u.gui.fontset;
+		if (prim_aep->ae_u.gui.fontset != NOFONTSET)
+		    new_en.ae_u.gui.fontset = prim_aep->ae_u.gui.fontset;
 # endif
 	    }
 	}
@@ -2770,37 +2777,37 @@ hl_combine_attr(int char_attr, int prim_attr)
 		new_en.ae_attr = ATTR_COMBINE(new_en.ae_attr, prim_attr);
 	else
 	{
-	    spell_aep = syn_cterm_attr2entry(prim_attr);
-	    if (spell_aep != NULL)
+	    prim_aep = syn_cterm_attr2entry(prim_attr);
+	    if (prim_aep != NULL)
 	    {
 		new_en.ae_attr = ATTR_COMBINE(new_en.ae_attr,
-							   spell_aep->ae_attr);
-		if (spell_aep->ae_u.cterm.fg_color > 0)
-		    new_en.ae_u.cterm.fg_color = spell_aep->ae_u.cterm.fg_color;
-		if (spell_aep->ae_u.cterm.bg_color > 0)
-		    new_en.ae_u.cterm.bg_color = spell_aep->ae_u.cterm.bg_color;
-		if (spell_aep->ae_u.cterm.ul_color > 0)
-		    new_en.ae_u.cterm.ul_color = spell_aep->ae_u.cterm.ul_color;
+							   prim_aep->ae_attr);
+		if (prim_aep->ae_u.cterm.fg_color > 0)
+		    new_en.ae_u.cterm.fg_color = prim_aep->ae_u.cterm.fg_color;
+		if (prim_aep->ae_u.cterm.bg_color > 0)
+		    new_en.ae_u.cterm.bg_color = prim_aep->ae_u.cterm.bg_color;
+		if (prim_aep->ae_u.cterm.ul_color > 0)
+		    new_en.ae_u.cterm.ul_color = prim_aep->ae_u.cterm.ul_color;
 #ifdef FEAT_TERMGUICOLORS
 		// If both fg and bg are not set fall back to cterm colors.
 		// Helps for SpellBad which uses undercurl in the GUI.
-		if (COLOR_INVALID(spell_aep->ae_u.cterm.fg_rgb)
-			&& COLOR_INVALID(spell_aep->ae_u.cterm.bg_rgb))
+		if (COLOR_INVALID(prim_aep->ae_u.cterm.fg_rgb)
+			&& COLOR_INVALID(prim_aep->ae_u.cterm.bg_rgb))
 		{
-		    if (spell_aep->ae_u.cterm.fg_color > 0)
+		    if (prim_aep->ae_u.cterm.fg_color > 0)
 			new_en.ae_u.cterm.fg_rgb = CTERMCOLOR;
-		    if (spell_aep->ae_u.cterm.bg_color > 0)
+		    if (prim_aep->ae_u.cterm.bg_color > 0)
 			new_en.ae_u.cterm.bg_rgb = CTERMCOLOR;
 		}
 		else
 		{
-		    if (spell_aep->ae_u.cterm.fg_rgb != INVALCOLOR)
-			new_en.ae_u.cterm.fg_rgb = spell_aep->ae_u.cterm.fg_rgb;
-		    if (spell_aep->ae_u.cterm.bg_rgb != INVALCOLOR)
-			new_en.ae_u.cterm.bg_rgb = spell_aep->ae_u.cterm.bg_rgb;
+		    if (prim_aep->ae_u.cterm.fg_rgb != INVALCOLOR)
+			new_en.ae_u.cterm.fg_rgb = prim_aep->ae_u.cterm.fg_rgb;
+		    if (prim_aep->ae_u.cterm.bg_rgb != INVALCOLOR)
+			new_en.ae_u.cterm.bg_rgb = prim_aep->ae_u.cterm.bg_rgb;
 		}
-		if (spell_aep->ae_u.cterm.ul_rgb != INVALCOLOR)
-		    new_en.ae_u.cterm.ul_rgb = spell_aep->ae_u.cterm.ul_rgb;
+		if (prim_aep->ae_u.cterm.ul_rgb != INVALCOLOR)
+		    new_en.ae_u.cterm.ul_rgb = prim_aep->ae_u.cterm.ul_rgb;
 #endif
 	    }
 	}
@@ -2822,14 +2829,14 @@ hl_combine_attr(int char_attr, int prim_attr)
 	new_en.ae_attr = ATTR_COMBINE(new_en.ae_attr, prim_attr);
     else
     {
-	spell_aep = syn_term_attr2entry(prim_attr);
-	if (spell_aep != NULL)
+	prim_aep = syn_term_attr2entry(prim_attr);
+	if (prim_aep != NULL)
 	{
-	    new_en.ae_attr = ATTR_COMBINE(new_en.ae_attr, spell_aep->ae_attr);
-	    if (spell_aep->ae_u.term.start != NULL)
+	    new_en.ae_attr = ATTR_COMBINE(new_en.ae_attr, prim_aep->ae_attr);
+	    if (prim_aep->ae_u.term.start != NULL)
 	    {
-		new_en.ae_u.term.start = spell_aep->ae_u.term.start;
-		new_en.ae_u.term.stop = spell_aep->ae_u.term.stop;
+		new_en.ae_u.term.start = prim_aep->ae_u.term.start;
+		new_en.ae_u.term.stop = prim_aep->ae_u.term.stop;
 	    }
 	}
     }
@@ -2962,7 +2969,7 @@ highlight_list_arg(
     char_u	*sarg,
     char	*name)
 {
-    char_u	buf[100];
+    char_u	buf[MAX_ATTR_LEN];
     char_u	*ts;
     int		i;
 
@@ -2983,8 +2990,8 @@ highlight_list_arg(
 		if (iarg & hl_attr_table[i])
 		{
 		    if (buf[0] != NUL)
-			vim_strcat(buf, (char_u *)",", 100);
-		    vim_strcat(buf, (char_u *)hl_name_table[i], 100);
+			vim_strcat(buf, (char_u *)",", MAX_ATTR_LEN);
+		    vim_strcat(buf, (char_u *)hl_name_table[i], MAX_ATTR_LEN);
 		    iarg &= ~hl_attr_table[i];	    // don't want "inverse"
 		}
 	    }
@@ -3282,32 +3289,12 @@ set_hl_attr(
 	at_en.ae_u.cterm.bg_color = sgp->sg_cterm_bg;
 	at_en.ae_u.cterm.ul_color = sgp->sg_cterm_ul;
 # ifdef FEAT_TERMGUICOLORS
-#  ifdef MSWIN
-#   ifdef VIMDLL
-	// Only when not using the GUI.
-	if (!gui.in_use && !gui.starting)
-#   endif
-	{
-	    int id;
-	    guicolor_T fg, bg;
-
-	    id = syn_name2id((char_u *)"Normal");
-	    if (id > 0)
-	    {
-		syn_id2colors(id, &fg, &bg);
-		if (sgp->sg_gui_fg == INVALCOLOR)
-		    sgp->sg_gui_fg = fg;
-		if (sgp->sg_gui_bg == INVALCOLOR)
-		    sgp->sg_gui_bg = bg;
-	    }
-
-	}
-#  endif
 	at_en.ae_u.cterm.fg_rgb = GUI_MCH_GET_RGB2(sgp->sg_gui_fg);
 	at_en.ae_u.cterm.bg_rgb = GUI_MCH_GET_RGB2(sgp->sg_gui_bg);
 	// Only use the underline/undercurl color when used, it may clear the
 	// background color if not supported.
-	if (sgp->sg_cterm & (HL_UNDERLINE | HL_UNDERCURL))
+	if (sgp->sg_cterm & (HL_UNDERLINE | HL_UNDERCURL
+			   | HL_UNDERDOUBLE | HL_UNDERDOTTED | HL_UNDERDASHED))
 	    at_en.ae_u.cterm.ul_rgb = GUI_MCH_GET_RGB2(sgp->sg_gui_sp);
 	else
 	    at_en.ae_u.cterm.ul_rgb = INVALCOLOR;
@@ -3517,6 +3504,7 @@ syn_unadd_group(void)
 
 /*
  * Translate a group ID to highlight attributes.
+ * "hl_id" must be valid: > 0, caller must check.
  */
     int
 syn_id2attr(int hl_id)
@@ -3820,6 +3808,12 @@ highlight_changed(void)
 		    case 'u':	attr |= HL_UNDERLINE;
 				break;
 		    case 'c':	attr |= HL_UNDERCURL;
+				break;
+		    case '2':	attr |= HL_UNDERDOUBLE;
+				break;
+		    case 'd':	attr |= HL_UNDERDOTTED;
+				break;
+		    case '=':	attr |= HL_UNDERDASHED;
 				break;
 		    case 't':	attr |= HL_STRIKETHROUGH;
 				break;
@@ -4324,8 +4318,7 @@ hldict_attr_to_str(
     p = attr_str;
     for (i = 0; i < (int)ARRAY_LENGTH(hl_name_table); i++)
     {
-	if (dict_get_bool(attrdict, (char_u *)hl_name_table[i],
-		    VVAL_FALSE) == VVAL_TRUE)
+	if (dict_get_bool(attrdict, hl_name_table[i], VVAL_FALSE) == VVAL_TRUE)
 	{
 	    if (p != attr_str && (size_t)(p - attr_str + 2) < len)
 		STRCPY(p, (char_u *)",");
@@ -4382,9 +4375,9 @@ hlg_add_or_update(dict_T *dict)
 {
     char_u	*name;
     int		error;
-    char_u	term_attr[80];
-    char_u	cterm_attr[80];
-    char_u	gui_attr[80];
+    char_u	term_attr[MAX_ATTR_LEN];
+    char_u	cterm_attr[MAX_ATTR_LEN];
+    char_u	gui_attr[MAX_ATTR_LEN];
     char_u	*start;
     char_u	*stop;
     char_u	*ctermfg;
@@ -4405,18 +4398,18 @@ hlg_add_or_update(dict_T *dict)
     if (name == NULL || *name == NUL || error)
 	return FALSE;
 
-    if (dict_get_bool(dict, (char_u *)"force", VVAL_FALSE) == VVAL_TRUE)
+    if (dict_get_bool(dict, "force", VVAL_FALSE) == VVAL_TRUE)
 	forceit = TRUE;
 
-    if (dict_get_bool(dict, (char_u *)"default", VVAL_FALSE) == VVAL_TRUE)
+    if (dict_get_bool(dict, "default", VVAL_FALSE) == VVAL_TRUE)
 	dodefault = TRUE;
 
-    if (dict_find(dict, (char_u *)"cleared", -1) != NULL)
+    if (dict_has_key(dict, "cleared"))
     {
 	varnumber_T	cleared;
 
 	// clear a highlight group
-	cleared = dict_get_bool(dict, (char_u *)"cleared", FALSE);
+	cleared = dict_get_bool(dict, "cleared", FALSE);
 	if (cleared == TRUE)
 	{
 	    vim_snprintf((char *)hlsetBuf, HLSETBUFSZ, "clear %s", name);
@@ -4425,7 +4418,7 @@ hlg_add_or_update(dict_T *dict)
 	}
     }
 
-    if (dict_find(dict, (char_u *)"linksto", -1) != NULL)
+    if (dict_has_key(dict, "linksto"))
     {
 	char_u	*linksto;
 

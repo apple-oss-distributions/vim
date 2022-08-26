@@ -339,7 +339,7 @@ func Test_undofile_earlier()
   " create undofile with timestamps older than Vim startup time.
   let t0 = localtime() - 43200
   call test_settime(t0)
-  new Xfile
+  new XfileEarlier
   call feedkeys("ione\<Esc>", 'xt')
   set ul=100
   call test_settime(t0 + 1)
@@ -353,12 +353,12 @@ func Test_undofile_earlier()
   bwipe!
   " restore normal timestamps.
   call test_settime(0)
-  new Xfile
+  new XfileEarlier
   rundo Xundofile
   earlier 1d
   call assert_equal('', getline(1))
   bwipe!
-  call delete('Xfile')
+  call delete('XfileEarlier')
   call delete('Xundofile')
 endfunc
 
@@ -753,6 +753,23 @@ func Test_redo_multibyte_in_insert_mode()
   call feedkeys("a\<C-K>ft", 'xt')
   call feedkeys("uiHe\<C-O>.llo", 'xt')
   call assert_equal("He\ufb05llo", getline(1))
+  bwipe!
+endfunc
+
+func Test_undo_mark()
+  new
+  " The undo is applied to the only line.
+  call setline(1, 'hello')
+  call feedkeys("ggyiw$p", 'xt')
+  undo
+  call assert_equal([0, 1, 1, 0], getpos("'["))
+  call assert_equal([0, 1, 1, 0], getpos("']"))
+  " The undo removes the last line.
+  call feedkeys("Goaaaa\<Esc>", 'xt')
+  call feedkeys("obbbb\<Esc>", 'xt')
+  undo
+  call assert_equal([0, 2, 1, 0], getpos("'["))
+  call assert_equal([0, 2, 1, 0], getpos("']"))
   bwipe!
 endfunc
 

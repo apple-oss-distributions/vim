@@ -186,12 +186,13 @@ shortpath_for_invalid_fname(
 	    // unless get_short_pathname() did its work in-place.
 	    *fname = *bufp = save_fname;
 	    if (short_fname != save_fname)
-		vim_strncpy(save_fname, short_fname, len);
+		STRNCPY(save_fname, short_fname, len);
 	    save_fname = NULL;
 	}
 
 	// concat the not-shortened part of the path
-	vim_strncpy(*fname + len, endp, sfx_len);
+	if ((*fname + len) != endp)
+	    vim_strncpy(*fname + len, endp, sfx_len);
 	(*fname)[new_len] = NUL;
     }
 
@@ -372,12 +373,12 @@ repeat:
 	    {
 		if (GetLongPathNameW(wfname, buf, _MAX_PATH))
 		{
-		    char_u *p = utf16_to_enc(buf, NULL);
+		    char_u *q = utf16_to_enc(buf, NULL);
 
-		    if (p != NULL)
+		    if (q != NULL)
 		    {
 			vim_free(*bufp);    // free any allocated file name
-			*bufp = *fnamep = p;
+			*bufp = *fnamep = q;
 		    }
 		}
 		vim_free(wfname);
@@ -416,7 +417,7 @@ repeat:
 	// Need full path first (use expand_env() to remove a "~/")
 	if (!has_fullname && !has_homerelative)
 	{
-	    if ((c == '.' || c == '~') && **fnamep == '~')
+	    if (**fnamep == '~')
 		p = pbuf = expand_env_save(*fnamep);
 	    else
 		p = pbuf = FullName_save(*fnamep, FALSE);
@@ -773,6 +774,26 @@ shorten_dir(char_u *str)
     shorten_dir_len(str, 1);
 }
 
+/*
+ * Return TRUE if "fname" is a readable file.
+ */
+    int
+file_is_readable(char_u *fname)
+{
+    int		fd;
+
+#ifndef O_NONBLOCK
+# define O_NONBLOCK 0
+#endif
+    if (*fname && !mch_isdir(fname)
+	      && (fd = mch_open((char *)fname, O_RDONLY | O_NONBLOCK, 0)) >= 0)
+    {
+	close(fd);
+	return TRUE;
+    }
+    return FALSE;
+}
+
 #if defined(FEAT_EVAL) || defined(PROTO)
 
 /*
@@ -898,27 +919,9 @@ f_exepath(typval_T *argvars, typval_T *rettv)
     void
 f_filereadable(typval_T *argvars, typval_T *rettv)
 {
-    int		fd;
-    char_u	*p;
-    int		n;
-
     if (in_vim9script() && check_for_string_arg(argvars, 0) == FAIL)
 	return;
-
-#ifndef O_NONBLOCK
-# define O_NONBLOCK 0
-#endif
-    p = tv_get_string(&argvars[0]);
-    if (*p && !mch_isdir(p) && (fd = mch_open((char *)p,
-					      O_RDONLY | O_NONBLOCK, 0)) >= 0)
-    {
-	n = TRUE;
-	close(fd);
-    }
-    else
-	n = FALSE;
-
-    rettv->vval.v_number = n;
+    rettv->vval.v_number = file_is_readable(tv_get_string(&argvars[0]));
 }
 
 /*
@@ -939,7 +942,6 @@ findfilendir(
     typval_T	*rettv,
     int		find_what UNUSED)
 {
-#ifdef FEAT_SEARCHPATH
     char_u	*fname;
     char_u	*fresult = NULL;
     char_u	*path = *curbuf->b_p_path == NUL ? p_path : curbuf->b_p_path;
@@ -948,7 +950,6 @@ findfilendir(
     int		count = 1;
     int		first = TRUE;
     int		error = FALSE;
-#endif
 
     rettv->vval.v_string = NULL;
     rettv->v_type = VAR_STRING;
@@ -959,7 +960,6 @@ findfilendir(
 		    && check_for_opt_number_arg(argvars, 2) == FAIL)))
 	return;
 
-#ifdef FEAT_SEARCHPATH
     fname = tv_get_string(&argvars[0]);
 
     if (argvars[1].v_type != VAR_UNKNOWN)
@@ -1003,7 +1003,6 @@ findfilendir(
 
     if (rettv->v_type == VAR_STRING)
 	rettv->vval.v_string = fresult;
-#endif
 }
 
 /*
@@ -1311,7 +1310,7 @@ f_glob(typval_T *argvars, typval_T *rettv)
 	if (rettv->v_type == VAR_STRING)
 	    rettv->vval.v_string = ExpandOne(&xpc, tv_get_string(&argvars[0]),
 						     NULL, options, WILD_ALL);
-	else if (rettv_list_alloc(rettv) != FAIL)
+	else if (rettv_list_alloc(rettv) == OK)
 	{
 	  int i;
 
@@ -1392,7 +1391,7 @@ f_globpath(typval_T *argvars, typval_T *rettv)
 	globpath(tv_get_string(&argvars[0]), file, &ga, flags);
 	if (rettv->v_type == VAR_STRING)
 	    rettv->vval.v_string = ga_concat_strings(&ga, "\n");
-	else if (rettv_list_alloc(rettv) != FAIL)
+	else if (rettv_list_alloc(rettv) == OK)
 	    for (i = 0; i < ga.ga_len; ++i)
 		list_append_string(rettv->vval.v_list,
 					    ((char_u **)(ga.ga_data))[i], -1);
@@ -1412,6 +1411,18 @@ f_isdirectory(typval_T *argvars, typval_T *rettv)
 	return;
 
     rettv->vval.v_number = mch_isdir(tv_get_string(&argvars[0]));
+}
+
+/*
+ * "isabsolutepath()" function
+ */
+    void
+f_isabsolutepath(typval_T *argvars, typval_T *rettv)
+{
+    if (in_vim9script() && check_for_string_arg(argvars, 0) == FAIL)
+	return;
+
+    rettv->vval.v_number = mch_isFullName(tv_get_string_strict(&argvars[0]));
 }
 
 /*
@@ -1603,8 +1614,8 @@ readdirex_dict_arg(typval_T *tv, int *cmp)
 	return FAIL;
     }
 
-    if (dict_find(tv->vval.v_dict, (char_u *)"sort", -1) != NULL)
-	compare = dict_get_string(tv->vval.v_dict, (char_u *)"sort", FALSE);
+    if (dict_has_key(tv->vval.v_dict, "sort"))
+	compare = dict_get_string(tv->vval.v_dict, "sort", FALSE);
     else
     {
 	semsg(_(e_dictionary_key_str_required), "sort");
@@ -1634,7 +1645,7 @@ f_readdir(typval_T *argvars, typval_T *rettv)
     char_u	*p;
     garray_T	ga;
     int		i;
-    int         sort = READDIR_SORT_BYTE;
+    int		sort = READDIR_SORT_BYTE;
 
     if (rettv_list_alloc(rettv) == FAIL)
 	return;
@@ -1687,7 +1698,7 @@ f_readdirex(typval_T *argvars, typval_T *rettv)
     char_u	*path;
     garray_T	ga;
     int		i;
-    int         sort = READDIR_SORT_BYTE;
+    int		sort = READDIR_SORT_BYTE;
 
     if (rettv_list_alloc(rettv) == FAIL)
 	return;
@@ -1761,7 +1772,7 @@ read_file_or_blob(typval_T *argvars, typval_T *rettv, int always_blob)
 
     if (mch_isdir(fname))
     {
-	semsg(_(e_src_is_directory), fname);
+	semsg(_(e_str_is_directory), fname);
 	return;
     }
     if (*fname == NUL || (fd = mch_fopen((char *)fname, READBIN)) == NULL)
@@ -2208,16 +2219,7 @@ f_tempname(typval_T *argvars UNUSED, typval_T *rettv)
 	else if (x == '9')
 	    x = 'A';
 	else
-	{
-#ifdef EBCDIC
-	    if (x == 'I')
-		x = 'J';
-	    else if (x == 'R')
-		x = 'S';
-	    else
-#endif
-		++x;
-	}
+	    ++x;
     } while (x == 'I' || x == 'O');
 }
 
@@ -3092,7 +3094,7 @@ expand_wildcards_eval(
     {
 	++emsg_off;
 	eval_pat = eval_vars(exp_pat, exp_pat, &usedlen,
-						    NULL, &ignored_msg, NULL);
+					       NULL, &ignored_msg, NULL, TRUE);
 	--emsg_off;
 	if (eval_pat != NULL)
 	    exp_pat = concat_str(eval_pat, exp_pat + usedlen);
@@ -3174,8 +3176,9 @@ expand_wildcards(
 
     /*
      * Move the names where 'suffixes' match to the end.
+     * Skip when interrupted, the result probably won't be used.
      */
-    if (*num_files > 1)
+    if (*num_files > 1 && !got_int)
     {
 	non_suf_match = 0;
 	for (i = 0; i < *num_files; ++i)
@@ -3584,6 +3587,7 @@ unix_expandpath(
     int		didstar)	// expanded "**" once already
 {
     char_u	*buf;
+    size_t	buflen;
     char_u	*path_end;
     char_u	*p, *s, *e;
     int		start_len = gap->ga_len;
@@ -3607,7 +3611,8 @@ unix_expandpath(
     }
 
     // make room for file name
-    buf = alloc(STRLEN(path) + BASENAMELEN + 5);
+    buflen = STRLEN(path) + BASENAMELEN + 5;
+    buf = alloc(buflen);
     if (buf == NULL)
 	return 0;
 
@@ -3635,7 +3640,7 @@ unix_expandpath(
 	else if (path_end >= path + wildoff
 			 && (vim_strchr((char_u *)"*?[{~$", *path_end) != NULL
 			     || (!p_fic && (flags & EW_ICASE)
-					     && isalpha(PTR2CHAR(path_end)))))
+					  && vim_isalpha(PTR2CHAR(path_end)))))
 	    e = p;
 	if (has_mbyte)
 	{
@@ -3711,7 +3716,7 @@ unix_expandpath(
     // Find all matching entries
     if (dirp != NULL)
     {
-	for (;;)
+	while (!got_int)
 	{
 	    dp = readdir(dirp);
 	    if (dp == NULL)
@@ -3732,14 +3737,14 @@ unix_expandpath(
 		{
 		    // For "**" in the pattern first go deeper in the tree to
 		    // find matches.
-		    STRCPY(buf + len, "/**");
-		    STRCPY(buf + len + 3, path_end);
+		    vim_snprintf((char *)buf + len, buflen - len,
+							    "/**%s", path_end);
 		    ++stardepth;
 		    (void)unix_expandpath(gap, buf, len + 1, flags, TRUE);
 		    --stardepth;
 		}
 
-		STRCPY(buf + len, path_end);
+		vim_snprintf((char *)buf + len, buflen - len, "%s", path_end);
 		if (mch_has_exp_wildcard(path_end)) // handle more wildcards
 		{
 		    // need to expand another component of the path
@@ -3781,8 +3786,10 @@ unix_expandpath(
     vim_free(buf);
     vim_regfree(regmatch.regprog);
 
+    // When interrupted the matches probably won't be used and sorting can be
+    // slow, thus skip it.
     matches = gap->ga_len - start_len;
-    if (matches > 0)
+    if (matches > 0 && !got_int)
 	qsort(((char_u **)gap->ga_data) + start_len, matches,
 						   sizeof(char_u *), pstrcmp);
     return matches;
@@ -3868,9 +3875,7 @@ gen_expand_wildcards(
     static int		recursive = FALSE;
     int			add_pat;
     int			retval = OK;
-#if defined(FEAT_SEARCHPATH)
     int			did_expand_in_path = FALSE;
-#endif
 
     /*
      * expand_env() is called to expand things like "~user".  If this fails,
@@ -3910,7 +3915,7 @@ gen_expand_wildcards(
      */
     ga_init2(&ga, sizeof(char_u *), 30);
 
-    for (i = 0; i < num_pat; ++i)
+    for (i = 0; i < num_pat && !got_int; ++i)
     {
 	add_pat = -1;
 	p = pat[i];
@@ -3952,15 +3957,14 @@ gen_expand_wildcards(
 	    }
 
 	    /*
-	     * If there are wildcards: Expand file names and add each match to
-	     * the list.  If there is no match, and EW_NOTFOUND is given, add
-	     * the pattern.
-	     * If there are no wildcards: Add the file name if it exists or
-	     * when EW_NOTFOUND is given.
+	     * If there are wildcards or case-insensitive expansion is
+	     * required: Expand file names and add each match to the list.  If
+	     * there is no match, and EW_NOTFOUND is given, add the pattern.
+	     * Otherwise: Add the file name if it exists or when EW_NOTFOUND is
+	     * given.
 	     */
-	    if (mch_has_exp_wildcard(p))
+	    if (mch_has_exp_wildcard(p) || (flags & EW_ICASE))
 	    {
-#if defined(FEAT_SEARCHPATH)
 		if ((flags & EW_PATH)
 			&& !mch_isFullName(p)
 			&& !(p[0] == '.'
@@ -3976,7 +3980,6 @@ gen_expand_wildcards(
 		    did_expand_in_path = TRUE;
 		}
 		else
-#endif
 		    add_pat = mch_expandpath(&ga, p, flags);
 	    }
 	}
@@ -3996,17 +3999,15 @@ gen_expand_wildcards(
 		vim_free(t);
 	}
 
-#if defined(FEAT_SEARCHPATH)
 	if (did_expand_in_path && ga.ga_len > 0 && (flags & EW_PATH))
 	    uniquefy_paths(&ga, p);
-#endif
 	if (p != pat[i])
 	    vim_free(p);
     }
 
     // When returning FAIL the array must be freed here.
     if (retval == FAIL)
-	ga_clear(&ga);
+	ga_clear_strings(&ga);
 
     *num_file = ga.ga_len;
     *file = (ga.ga_data != NULL) ? (char_u **)ga.ga_data

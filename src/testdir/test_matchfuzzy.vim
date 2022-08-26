@@ -57,7 +57,7 @@ func Test_matchfuzzy()
 
   %bw!
   eval ['somebuf', 'anotherone', 'needle', 'yetanotherone']->map({_, v -> bufadd(v) + bufload(v)})
-  let l = getbufinfo()->map({_, v -> v.name})->matchfuzzy('ndl')
+  let l = getbufinfo()->map({_, v -> fnamemodify(v.name, ':t')})->matchfuzzy('ndl')
   call assert_equal(1, len(l))
   call assert_match('needle', l[0])
 
@@ -126,6 +126,9 @@ func Test_matchfuzzypos()
 
   " match multiple words (separated by space)
   call assert_equal([['foo bar baz'], [[8, 9, 10, 0, 1, 2]], [369]], ['foo bar baz', 'foo', 'foo bar', 'baz bar']->matchfuzzypos('baz foo'))
+  call assert_equal([[], [], []], ['foo bar baz', 'foo', 'foo bar', 'baz bar']->matchfuzzypos('baz foo', {'matchseq': 1}))
+  call assert_equal([['foo bar baz'], [[0, 1, 2, 8, 9, 10]], [369]], ['foo bar baz', 'foo', 'foo bar', 'baz bar']->matchfuzzypos('foo baz'))
+  call assert_equal([['foo bar baz'], [[0, 1, 2, 3, 4, 5, 10]], [326]], ['foo bar baz', 'foo', 'foo bar', 'baz bar']->matchfuzzypos('foo baz', {'matchseq': 1}))
   call assert_equal([[], [], []], ['foo bar baz', 'foo', 'foo bar', 'baz bar']->matchfuzzypos('one two'))
   call assert_equal([[], [], []], ['foo bar']->matchfuzzypos(" \t "))
   call assert_equal([['grace'], [[1, 2, 3, 4, 2, 3, 4, 0, 1, 2, 3, 4]], [657]], ['grace']->matchfuzzypos('race ace grace'))
@@ -228,6 +231,26 @@ func Test_matchfuzzypos_mbyte()
   call assert_equal([['aンbヹcㄇdンヹㄇ'], [[7, 8, 9]], [158]], matchfuzzypos(['aンbヹcㄇdンヹㄇ'], 'ンヹㄇ'))
   " best recursive match
   call assert_equal([['xффйд'], [[2, 3, 4]], [168]], matchfuzzypos(['xффйд'], 'фйд'))
+endfunc
+
+" Test for matchfuzzy() with limit
+func Test_matchfuzzy_limit()
+  let x = ['1', '2', '3', '2']
+  call assert_equal(['2', '2'], x->matchfuzzy('2'))
+  call assert_equal(['2', '2'], x->matchfuzzy('2', #{}))
+  call assert_equal(['2', '2'], x->matchfuzzy('2', #{limit: 0}))
+  call assert_equal(['2'], x->matchfuzzy('2', #{limit: 1}))
+  call assert_equal(['2', '2'], x->matchfuzzy('2', #{limit: 2}))
+  call assert_equal(['2', '2'], x->matchfuzzy('2', #{limit: 3}))
+  call assert_fails("call matchfuzzy(x, '2', #{limit: '2'})", 'E475:')
+
+  let l = [{'id': 5, 'val': 'crayon'}, {'id': 6, 'val': 'camera'}]
+  call assert_equal([{'id': 5, 'val': 'crayon'}, {'id': 6, 'val': 'camera'}], l->matchfuzzy('c', #{text_cb: {v -> v.val}}))
+  call assert_equal([{'id': 5, 'val': 'crayon'}, {'id': 6, 'val': 'camera'}], l->matchfuzzy('c', #{key: 'val'}))
+  call assert_equal([{'id': 5, 'val': 'crayon'}, {'id': 6, 'val': 'camera'}], l->matchfuzzy('c', #{text_cb: {v -> v.val}, limit: 0}))
+  call assert_equal([{'id': 5, 'val': 'crayon'}, {'id': 6, 'val': 'camera'}], l->matchfuzzy('c', #{key: 'val', limit: 0}))
+  call assert_equal([{'id': 5, 'val': 'crayon'}], l->matchfuzzy('c', #{text_cb: {v -> v.val}, limit: 1}))
+  call assert_equal([{'id': 5, 'val': 'crayon'}], l->matchfuzzy('c', #{key: 'val', limit: 1}))
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -248,7 +248,7 @@ insert_sign(
 	    // column for signs.
 	    if (buf->b_signlist == NULL)
 	    {
-		redraw_buf_later(buf, NOT_VALID);
+		redraw_buf_later(buf, UPD_NOT_VALID);
 		changed_line_abv_curs();
 	    }
 
@@ -616,7 +616,7 @@ buf_delsign(
     // sign columns no longer shows.  And the 'signcolumn' may be hidden.
     if (buf->b_signlist == NULL)
     {
-	redraw_buf_later(buf, NOT_VALID);
+	redraw_buf_later(buf, UPD_NOT_VALID);
 	changed_line_abv_curs();
     }
 
@@ -757,7 +757,7 @@ buf_delete_signs(buf_T *buf, char_u *group)
     // sign column. Not when curwin is NULL (this means we're exiting).
     if (buf->b_signlist != NULL && curwin != NULL)
     {
-	redraw_buf_later(buf, NOT_VALID);
+	redraw_buf_later(buf, UPD_NOT_VALID);
 	changed_line_abv_curs();
     }
 
@@ -847,7 +847,7 @@ sign_mark_adjust(
 	if (sign->se_lnum < line1)
 	    continue;
 	new_lnum = sign->se_lnum;
-	if (sign->se_lnum >= line1 && sign->se_lnum <= line2)
+	if (sign->se_lnum <= line2)
 	{
 	    if (amount != MAXLNUM)
 		new_lnum += amount;
@@ -1073,7 +1073,7 @@ sign_define_by_name(
 	// non-empty sign list.
 	FOR_ALL_WINDOWS(wp)
 	    if (wp->w_buffer->b_signlist != NULL)
-		redraw_buf_later(wp->w_buffer, NOT_VALID);
+		redraw_buf_later(wp->w_buffer, UPD_NOT_VALID);
     }
 
     // set values for a defined sign.
@@ -1243,7 +1243,7 @@ sign_unplace(int sign_id, char_u *sign_group, buf_T *buf, linenr_T atlnum)
     if (sign_id == 0)
     {
 	// Delete all the signs in the specified buffer
-	redraw_buf_later(buf, NOT_VALID);
+	redraw_buf_later(buf, UPD_NOT_VALID);
 	buf_delete_signs(buf, sign_group);
     }
     else
@@ -1745,38 +1745,38 @@ sign_getinfo(sign_T *sp, dict_T *retdict)
 {
     char_u	*p;
 
-    dict_add_string(retdict, "name", (char_u *)sp->sn_name);
+    dict_add_string(retdict, "name", sp->sn_name);
     if (sp->sn_icon != NULL)
-	dict_add_string(retdict, "icon", (char_u *)sp->sn_icon);
+	dict_add_string(retdict, "icon", sp->sn_icon);
     if (sp->sn_text != NULL)
-	dict_add_string(retdict, "text", (char_u *)sp->sn_text);
+	dict_add_string(retdict, "text", sp->sn_text);
     if (sp->sn_line_hl > 0)
     {
 	p = get_highlight_name_ext(NULL, sp->sn_line_hl - 1, FALSE);
 	if (p == NULL)
 	    p = (char_u *)"NONE";
-	dict_add_string(retdict, "linehl", (char_u *)p);
+	dict_add_string(retdict, "linehl", p);
     }
     if (sp->sn_text_hl > 0)
     {
 	p = get_highlight_name_ext(NULL, sp->sn_text_hl - 1, FALSE);
 	if (p == NULL)
 	    p = (char_u *)"NONE";
-	dict_add_string(retdict, "texthl", (char_u *)p);
+	dict_add_string(retdict, "texthl", p);
     }
     if (sp->sn_cul_hl > 0)
     {
 	p = get_highlight_name_ext(NULL, sp->sn_cul_hl - 1, FALSE);
 	if (p == NULL)
 	    p = (char_u *)"NONE";
-	dict_add_string(retdict, "culhl", (char_u *)p);
+	dict_add_string(retdict, "culhl", p);
     }
     if (sp->sn_num_hl > 0)
     {
 	p = get_highlight_name_ext(NULL, sp->sn_num_hl - 1, FALSE);
 	if (p == NULL)
 	    p = (char_u *)"NONE";
-	dict_add_string(retdict, "numhl", (char_u *)p);
+	dict_add_string(retdict, "numhl", p);
     }
 }
 
@@ -2267,7 +2267,7 @@ sign_define_from_dict(char_u *name_arg, dict_T *dict)
     {
 	if (dict == NULL)
 	    return -1;
-	name = dict_get_string(dict, (char_u *)"name", TRUE);
+	name = dict_get_string(dict, "name", TRUE);
     }
     else
 	name = vim_strsave(name_arg);
@@ -2275,12 +2275,12 @@ sign_define_from_dict(char_u *name_arg, dict_T *dict)
 	goto cleanup;
     if (dict != NULL)
     {
-	icon = dict_get_string(dict, (char_u *)"icon", TRUE);
-	linehl = dict_get_string(dict, (char_u *)"linehl", TRUE);
-	text = dict_get_string(dict, (char_u *)"text", TRUE);
-	texthl = dict_get_string(dict, (char_u *)"texthl", TRUE);
-	culhl = dict_get_string(dict, (char_u *)"culhl", TRUE);
-	numhl = dict_get_string(dict, (char_u *)"numhl", TRUE);
+	icon = dict_get_string(dict, "icon", TRUE);
+	linehl = dict_get_string(dict, "linehl", TRUE);
+	text = dict_get_string(dict, "text", TRUE);
+	texthl = dict_get_string(dict, "texthl", TRUE);
+	culhl = dict_get_string(dict, "culhl", TRUE);
+	numhl = dict_get_string(dict, "numhl", TRUE);
     }
 
     if (sign_define_by_name(name, icon, linehl, text, texthl, culhl, numhl) == OK)
@@ -2335,7 +2335,7 @@ f_sign_define(typval_T *argvars, typval_T *rettv)
     if (argvars[0].v_type == VAR_LIST && argvars[1].v_type == VAR_UNKNOWN)
     {
 	// Define multiple signs
-	if (rettv_list_alloc(rettv) != OK)
+	if (rettv_list_alloc(rettv) == FAIL)
 	    return;
 
 	sign_define_multiple(argvars[0].vval.v_list, rettv->vval.v_list);
@@ -2367,7 +2367,7 @@ f_sign_getdefined(typval_T *argvars, typval_T *rettv)
 {
     char_u	*name = NULL;
 
-    if (rettv_list_alloc_id(rettv, aid_sign_getdefined) != OK)
+    if (rettv_list_alloc_id(rettv, aid_sign_getdefined) == FAIL)
 	return;
 
     if (in_vim9script() && check_for_opt_string_arg(argvars, 0) == FAIL)
@@ -2393,7 +2393,7 @@ f_sign_getplaced(typval_T *argvars, typval_T *rettv)
     char_u	*group = NULL;
     int		notanum = FALSE;
 
-    if (rettv_list_alloc_id(rettv, aid_sign_getplaced) != OK)
+    if (rettv_list_alloc_id(rettv, aid_sign_getplaced) == FAIL)
 	return;
 
     if (in_vim9script()
@@ -2661,7 +2661,7 @@ f_sign_placelist(typval_T *argvars, typval_T *rettv)
     listitem_T	*li;
     int		sign_id;
 
-    if (rettv_list_alloc(rettv) != OK)
+    if (rettv_list_alloc(rettv) == FAIL)
 	return;
 
     if (in_vim9script() && check_for_list_arg(argvars, 0) == FAIL)
@@ -2721,7 +2721,7 @@ f_sign_undefine(typval_T *argvars, typval_T *rettv)
     if (argvars[0].v_type == VAR_LIST && argvars[1].v_type == VAR_UNKNOWN)
     {
 	// Undefine multiple signs
-	if (rettv_list_alloc(rettv) != OK)
+	if (rettv_list_alloc(rettv) == FAIL)
 	    return;
 
 	sign_undefine_multiple(argvars[0].vval.v_list, rettv->vval.v_list);
@@ -2765,7 +2765,7 @@ sign_unplace_from_dict(typval_T *group_tv, dict_T *dict)
     if (group_tv != NULL)
 	group = tv_get_string(group_tv);
     else
-	group = dict_get_string(dict, (char_u *)"group", FALSE);
+	group = dict_get_string(dict, "group", FALSE);
     if (group != NULL)
     {
 	if (group[0] == '\0')			// global sign group
@@ -2786,9 +2786,9 @@ sign_unplace_from_dict(typval_T *group_tv, dict_T *dict)
 	    if (buf == NULL)
 		goto cleanup;
 	}
-	if (dict_find(dict, (char_u *)"id", -1) != NULL)
+	if (dict_has_key(dict, "id"))
 	{
-	    sign_id = dict_get_number(dict, (char_u *)"id");
+	    sign_id = dict_get_number(dict, "id");
 	    if (sign_id <= 0)
 	    {
 		emsg(_(e_invalid_argument));
@@ -2892,7 +2892,7 @@ f_sign_unplacelist(typval_T *argvars, typval_T *rettv)
     listitem_T	*li;
     int		retval;
 
-    if (rettv_list_alloc(rettv) != OK)
+    if (rettv_list_alloc(rettv) == FAIL)
 	return;
 
     if (in_vim9script() && check_for_list_arg(argvars, 0) == FAIL)

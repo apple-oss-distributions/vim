@@ -22,6 +22,13 @@ int mch_am_i_owner(char_u *name);
 static garray_T		ga_loaded = {0, 0, sizeof(char_u *), 4, NULL};
 #endif
 
+// last used sequence number for sourcing scripts (current_sctx.sc_seq)
+#ifdef FEAT_EVAL
+static int		last_current_SID_seq = 0;
+#endif
+
+static int do_source_ext(char_u *fname, int check_other, int is_vimrc, int *ret_sid, exarg_T *eap, int clearvars);
+
 /*
  * Initialize the execution stack.
  */
@@ -114,8 +121,9 @@ estack_pop(void)
 }
 
 /*
- * Get the current value for <sfile> in allocated memory.
- * "which" is ESTACK_SFILE for <sfile> and ESTACK_STACK for <stack>.
+ * Get the current value for "which" in allocated memory.
+ * "which" is ESTACK_SFILE for <sfile>, ESTACK_STACK for <stack> or
+ * ESTACK_SCRIPT for <script>.
  */
     char_u *
 estack_sfile(estack_arg_T which UNUSED)
@@ -150,6 +158,30 @@ estack_sfile(estack_arg_T which UNUSED)
 	    emsg_off = 0;
 	emsg(_(e_cannot_expand_sfile_in_vim9_function));
 	emsg_off = save_emsg_off;
+	return NULL;
+    }
+
+    // If evaluated in a function or autocommand, return the path of the script
+    // where it is defined, at script level the current script path is returned
+    // instead.
+    if (which == ESTACK_SCRIPT)
+    {
+	// Walk the stack backwards, starting from the current frame.
+	for (idx = exestack.ga_len - 1; idx >= 0; --idx, --entry)
+	{
+	    if (entry->es_type == ETYPE_UFUNC || entry->es_type == ETYPE_AUCMD)
+	    {
+		sctx_T *def_ctx = entry->es_type == ETYPE_UFUNC
+				      ? &entry->es_info.ufunc->uf_script_ctx
+				      : acp_script_ctx(entry->es_info.aucmd);
+
+		return def_ctx->sc_sid > 0
+			   ? vim_strsave(SCRIPT_ITEM(def_ctx->sc_sid)->sn_name)
+			   : NULL;
+	    }
+	    else if (entry->es_type == ETYPE_SCRIPT)
+		return vim_strsave(entry->es_name);
+	}
 	return NULL;
     }
 
@@ -248,7 +280,7 @@ source_callback(char_u *fname, void *cookie)
  * Find an already loaded script "name".
  * If found returns its script ID.  If not found returns -1.
  */
-    static int
+    int
 find_script_by_name(char_u *name)
 {
     int		    sid;
@@ -317,6 +349,21 @@ get_new_scriptitem(int *error)
     return sid;
 }
 
+    int
+get_new_scriptitem_for_fname(int *error, char_u *fname)
+{
+    int sid = get_new_scriptitem(error);
+
+    if (*error == OK)
+    {
+	scriptitem_T *si = SCRIPT_ITEM(sid);
+
+	si->sn_name = vim_strsave(fname);
+	si->sn_state = SN_STATE_NOT_LOADED;
+    }
+    return sid;
+}
+
     static void
 find_script_callback(char_u *fname, void *cookie)
 {
@@ -326,17 +373,8 @@ find_script_callback(char_u *fname, void *cookie)
 
     sid = find_script_by_name(fname);
     if (sid < 0)
-    {
 	// script does not exist yet, create a new scriptitem
-	sid = get_new_scriptitem(&error);
-	if (error == OK)
-	{
-	    scriptitem_T *si = SCRIPT_ITEM(sid);
-
-	    si->sn_name = vim_strsave(fname);
-	    si->sn_state = SN_STATE_NOT_LOADED;
-	}
-    }
+	sid = get_new_scriptitem_for_fname(&error, fname);
     *ret_sid = sid;
 }
 #endif
@@ -738,7 +776,7 @@ add_pack_dir_to_rtp(char_u *fname)
 	STRCAT(new_rtp, afterdir);
     }
 
-    set_option_value((char_u *)"rtp", 0L, new_rtp, 0);
+    set_option_value_give_err((char_u *)"rtp", 0L, new_rtp, 0);
     vim_free(new_rtp);
     retval = OK;
 
@@ -1081,9 +1119,36 @@ ExpandPackAddDir(
     static void
 cmd_source(char_u *fname, exarg_T *eap)
 {
-    if (*fname == NUL)
-	emsg(_(e_argument_required));
+    int clearvars = FALSE;
 
+    if (*fname != NUL && STRNCMP(fname, "++clear", 7) == 0)
+    {
+	// ++clear argument is supplied
+	clearvars = TRUE;
+	fname = fname + 7;
+	if (*fname != NUL)
+	{
+	    semsg(_(e_invalid_argument_str), eap->arg);
+	    return;
+	}
+    }
+
+    if (*fname != NUL && eap != NULL && eap->addr_count > 0)
+    {
+	// if a filename is specified to :source, then a range is not allowed
+	emsg(_(e_no_range_allowed));
+	return;
+    }
+
+    if (eap != NULL && *fname == NUL)
+    {
+	if (eap->forceit)
+	    // a file name is needed to source normal mode commands
+	    emsg(_(e_argument_required));
+	else
+	    // source ex commands from the current buffer
+	    do_source_ext(NULL, FALSE, FALSE, NULL, eap, clearvars);
+    }
     else if (eap != NULL && eap->forceit)
 	// ":source!": read Normal mode commands
 	// Need to execute the commands directly.  This is required at least
@@ -1221,35 +1286,93 @@ fopen_noinh_readbin(char *filename)
 #endif
 
 /*
- * do_source: Read the file "fname" and execute its lines as EX commands.
+ * Initialization for sourcing lines from the current buffer. Reads all the
+ * lines from the buffer and stores it in the cookie grow array.
+ * Returns a pointer to the name ":source buffer=<n>" on success and NULL on
+ * failure.
+ */
+    static char_u *
+do_source_buffer_init(source_cookie_T *sp, exarg_T *eap)
+{
+    linenr_T	curr_lnum;
+    char_u	*line = NULL;
+    char_u	*fname;
+
+    CLEAR_FIELD(*sp);
+
+    if (curbuf == NULL)
+	return NULL;
+
+    // Use ":source buffer=<num>" as the script name
+    vim_snprintf((char *)IObuff, IOSIZE, ":source buffer=%d", curbuf->b_fnum);
+    fname = vim_strsave(IObuff);
+    if (fname == NULL)
+	return NULL;
+
+    ga_init2(&sp->buflines, sizeof(char_u *), 100);
+
+    // Copy the lines from the buffer into a grow array
+    for (curr_lnum = eap->line1; curr_lnum <= eap->line2; curr_lnum++)
+    {
+	line = vim_strsave(ml_get(curr_lnum));
+	if (line == NULL)
+	    goto errret;
+	if (ga_add_string(&sp->buflines, line) == FAIL)
+	    goto errret;
+	line = NULL;
+    }
+    sp->buf_lnum = 0;
+    sp->source_from_buf = TRUE;
+
+    return fname;
+
+errret:
+    vim_free(fname);
+    vim_free(line);
+    ga_clear_strings(&sp->buflines);
+    return NULL;
+}
+
+/*
+ * Read the file "fname" and execute its lines as EX commands.
  * When "ret_sid" is not NULL and we loaded the script before, don't load it
  * again.
+ *
+ * The 'eap' argument is used when sourcing lines from a buffer instead of a
+ * file.
+ *
+ * If 'clearvars' is TRUE, then for scripts which are loaded more than
+ * once, clear all the functions and variables previously defined in that
+ * script.
  *
  * This function may be called recursively!
  *
  * Return FAIL if file could not be opened, OK otherwise.
  * If a scriptitem_T was found or created "*ret_sid" is set to the SID.
  */
-    int
-do_source(
+    static int
+do_source_ext(
     char_u	*fname,
     int		check_other,	    // check for .vimrc and _vimrc
     int		is_vimrc,	    // DOSO_ value
-    int		*ret_sid UNUSED)
+    int		*ret_sid UNUSED,
+    exarg_T	*eap,
+    int		clearvars UNUSED)
 {
     source_cookie_T	    cookie;
     char_u		    *p;
-    char_u		    *fname_exp;
+    char_u		    *fname_not_fixed = NULL;
+    char_u		    *fname_exp = NULL;
     char_u		    *firstline = NULL;
     int			    retval = FAIL;
     sctx_T		    save_current_sctx;
 #ifdef FEAT_EVAL
-    static int		    last_current_SID_seq = 0;
     funccal_entry_T	    funccalp_entry;
     int			    save_debug_break_level = debug_break_level;
-    int			    sid;
+    int			    sid = -1;
     scriptitem_T	    *si = NULL;
     int			    save_estack_compiling = estack_compiling;
+    ESTACK_CHECK_DECLARATION
 #endif
 #ifdef STARTUPTIME
     struct timeval	    tv_rel;
@@ -1258,20 +1381,30 @@ do_source(
 #ifdef FEAT_PROFILE
     proftime_T		    wait_start;
 #endif
+    int			    save_sticky_cmdmod_flags = sticky_cmdmod_flags;
     int			    trigger_source_post = FALSE;
-    ESTACK_CHECK_DECLARATION
 
-    p = expand_env_save(fname);
-    if (p == NULL)
-	return retval;
-    fname_exp = fix_fname(p);
-    vim_free(p);
-    if (fname_exp == NULL)
-	return retval;
-    if (mch_isdir(fname_exp))
+    CLEAR_FIELD(cookie);
+    if (fname == NULL)
     {
-	smsg(_("Cannot source a directory: \"%s\""), fname);
-	goto theend;
+	// sourcing lines from a buffer
+	fname_exp = do_source_buffer_init(&cookie, eap);
+	if (fname_exp == NULL)
+	    return FAIL;
+    }
+    else
+    {
+	fname_not_fixed = expand_env_save(fname);
+	if (fname_not_fixed == NULL)
+	    goto theend;
+	fname_exp = fix_fname(fname_not_fixed);
+	if (fname_exp == NULL)
+	    goto theend;
+	if (mch_isdir(fname_exp))
+	{
+	    smsg(_("Cannot source a directory: \"%s\""), fname);
+	    goto theend;
+	}
     }
 #ifdef FEAT_EVAL
     estack_compiling = FALSE;
@@ -1322,11 +1455,14 @@ do_source(
     }
 #endif /* __APPLE__ */
 
+    if (!cookie.source_from_buf)
+    {
 #ifdef USE_FOPEN_NOINH
-    cookie.fp = fopen_noinh_readbin((char *)fname_exp);
+	cookie.fp = fopen_noinh_readbin((char *)fname_exp);
 #else
-    cookie.fp = mch_fopen((char *)fname_exp, READBIN);
+	cookie.fp = mch_fopen((char *)fname_exp, READBIN);
 #endif
+    }
     if (cookie.fp == NULL && check_other)
     {
 	// Try again, replacing file name ".vimrc" by "_vimrc" or vice versa,
@@ -1349,7 +1485,7 @@ do_source(
 	}
     }
 
-    if (cookie.fp == NULL)
+    if (cookie.fp == NULL && !cookie.source_from_buf)
     {
 	if (p_verbose > 0)
 	{
@@ -1387,12 +1523,14 @@ do_source(
 	cookie.fileformat = EOL_DOS;
     else
 	cookie.fileformat = EOL_UNKNOWN;
-    cookie.error = FALSE;
 #endif
 
-    cookie.nextline = NULL;
-    cookie.sourcing_lnum = 0;
-    cookie.finished = FALSE;
+    if (fname == NULL)
+	// When sourcing a range of lines from a buffer, use the buffer line
+	// number.
+	cookie.sourcing_lnum = eap->line1 - 1;
+    else
+	cookie.sourcing_lnum = 0;
 
 #ifdef FEAT_EVAL
     // Check if this script has a breakpoint.
@@ -1403,17 +1541,21 @@ do_source(
     cookie.level = ex_nesting_level;
 #endif
 
-    // Keep the sourcing name/lnum, for recursive calls.
-    estack_push(ETYPE_SCRIPT, fname_exp, 0);
-    ESTACK_CHECK_SETUP
-
 #ifdef STARTUPTIME
     if (time_fd != NULL)
 	time_push(&tv_rel, &tv_start);
 #endif
 
+    // "legacy" does not apply to commands in the script
+    sticky_cmdmod_flags = 0;
+
     save_current_sctx = current_sctx;
-    current_sctx.sc_version = 1;  // default script version
+    if (cmdmod.cmod_flags & CMOD_VIM9CMD)
+	// When the ":vim9cmd" command modifier is used, source the script as a
+	// Vim9 script.
+	current_sctx.sc_version = SCRIPT_VERSION_VIM9;
+    else
+	current_sctx.sc_version = 1;  // default script version
 
 #ifdef FEAT_EVAL
 # ifdef FEAT_PROFILE
@@ -1449,20 +1591,25 @@ do_source(
 	{
 	    si->sn_state = SN_STATE_RELOAD;
 
-	    // Script-local variables remain but "const" can be set again.
-	    // In Vim9 script variables will be cleared when "vim9script" is
-	    // encountered without the "noclear" argument.
-	    ht = &SCRIPT_VARS(sid);
-	    todo = (int)ht->ht_used;
-	    for (hi = ht->ht_array; todo > 0; ++hi)
-		if (!HASHITEM_EMPTY(hi))
-		{
-		    --todo;
-		    di = HI2DI(hi);
-		    di->di_flags |= DI_FLAGS_RELOAD;
-		}
-	    // imports can be redefined once
-	    mark_imports_for_reload(sid);
+	    if (!clearvars)
+	    {
+		// Script-local variables remain but "const" can be set again.
+		// In Vim9 script variables will be cleared when "vim9script"
+		// is encountered without the "noclear" argument.
+		ht = &SCRIPT_VARS(sid);
+		todo = (int)ht->ht_used;
+		for (hi = ht->ht_array; todo > 0; ++hi)
+		    if (!HASHITEM_EMPTY(hi))
+		    {
+			--todo;
+			di = HI2DI(hi);
+			di->di_flags |= DI_FLAGS_RELOAD;
+		    }
+		// imports can be redefined once
+		mark_imports_for_reload(sid);
+	    }
+	    else
+		clear_vim9_scriptlocal_vars(sid);
 
 	    // reset version, "vim9script" may have been added or removed.
 	    si->sn_version = 1;
@@ -1473,18 +1620,23 @@ do_source(
 	int error = OK;
 
 	// It's new, generate a new SID and initialize the scriptitem.
-	current_sctx.sc_sid = get_new_scriptitem(&error);
+	sid = get_new_scriptitem(&error);
+	current_sctx.sc_sid = sid;
 	if (error == FAIL)
 	    goto almosttheend;
-	si = SCRIPT_ITEM(current_sctx.sc_sid);
+	si = SCRIPT_ITEM(sid);
 	si->sn_name = fname_exp;
 	fname_exp = vim_strsave(si->sn_name);  // used for autocmd
 	if (ret_sid != NULL)
-	    *ret_sid = current_sctx.sc_sid;
+	    *ret_sid = sid;
 
 	// Remember the "is_vimrc" flag for when the file is sourced again.
 	si->sn_is_vimrc = is_vimrc;
     }
+
+    // Keep the sourcing name/lnum, for recursive calls.
+    estack_push(ETYPE_SCRIPT, si->sn_name, 0);
+    ESTACK_CHECK_SETUP
 
 # ifdef FEAT_PROFILE
     if (do_profiling == PROF_YES)
@@ -1535,7 +1687,7 @@ do_source(
     if (do_profiling == PROF_YES)
     {
 	// Get "si" again, "script_items" may have been reallocated.
-	si = SCRIPT_ITEM(current_sctx.sc_sid);
+	si = SCRIPT_ITEM(sid);
 	if (si->sn_prof_on)
 	{
 	    profile_end(&si->sn_pr_start);
@@ -1549,7 +1701,9 @@ do_source(
 
     if (got_int)
 	emsg(_(e_interrupted));
+#ifdef FEAT_EVAL
     ESTACK_CHECK_NOW
+#endif
     estack_pop();
     if (p_verbose > 1)
     {
@@ -1584,7 +1738,7 @@ almosttheend:
     // If "sn_save_cpo" is set that means we encountered "vim9script": restore
     // 'cpoptions', unless in the main .vimrc file.
     // Get "si" again, "script_items" may have been reallocated.
-    si = SCRIPT_ITEM(current_sctx.sc_sid);
+    si = SCRIPT_ITEM(sid);
     if (si->sn_save_cpo != NULL && si->sn_is_vimrc == DOSO_NONE)
     {
 	if (STRCMP(p_cpo, CPO_VIM) != 0)
@@ -1614,7 +1768,8 @@ almosttheend:
 		    }
 		}
 	}
-	set_option_value((char_u *)"cpo", 0L, si->sn_save_cpo, OPT_NO_REDRAW);
+	set_option_value_give_err((char_u *)"cpo",
+					   0L, si->sn_save_cpo, OPT_NO_REDRAW);
     }
     VIM_CLEAR(si->sn_save_cpo);
 
@@ -1626,7 +1781,10 @@ almosttheend:
 #endif
     current_sctx = save_current_sctx;
 
-    fclose(cookie.fp);
+    if (cookie.fp != NULL)
+	fclose(cookie.fp);
+    if (cookie.source_from_buf)
+	ga_clear_strings(&cookie.buflines);
     vim_free(cookie.nextline);
     vim_free(firstline);
     convert_setup(&cookie.conv, NULL, NULL);
@@ -1635,12 +1793,39 @@ almosttheend:
 	apply_autocmds(EVENT_SOURCEPOST, fname_exp, fname_exp, FALSE, curbuf);
 
 theend:
+#ifdef FEAT_EVAL
+    if (sid > 0 && ret_sid != NULL
+	    && fname_not_fixed != NULL && fname_exp != NULL)
+    {
+	int not_fixed_sid = find_script_by_name(fname_not_fixed);
+
+	// If "fname_not_fixed" is a symlink then we source the linked file.
+	// If the original name is in the script list we add the ID of the
+	// script that was actually sourced.
+	if (SCRIPT_ID_VALID(not_fixed_sid) && not_fixed_sid != sid)
+	    SCRIPT_ITEM(not_fixed_sid)->sn_sourced_sid = sid;
+    }
+#endif
+
+    vim_free(fname_not_fixed);
     vim_free(fname_exp);
+    sticky_cmdmod_flags = save_sticky_cmdmod_flags;
 #ifdef FEAT_EVAL
     estack_compiling = save_estack_compiling;
 #endif
     return retval;
 }
+
+    int
+do_source(
+    char_u	*fname,
+    int		check_other,	    // check for .vimrc and _vimrc
+    int		is_vimrc,	    // DOSO_ value
+    int		*ret_sid)
+{
+    return do_source_ext(fname, check_other, is_vimrc, ret_sid, NULL, FALSE);
+}
+
 
 #if defined(FEAT_EVAL) || defined(PROTO)
 
@@ -1652,26 +1837,52 @@ ex_scriptnames(exarg_T *eap)
 {
     int i;
 
-    if (eap->addr_count > 0)
+    if (eap->addr_count > 0 || *eap->arg != NUL)
     {
 	// :script {scriptId}: edit the script
-	if (!SCRIPT_ID_VALID(eap->line2))
+	if (eap->addr_count > 0 && !SCRIPT_ID_VALID(eap->line2))
 	    emsg(_(e_invalid_argument));
 	else
 	{
-	    eap->arg = SCRIPT_ITEM(eap->line2)->sn_name;
+	    if (eap->addr_count > 0)
+		eap->arg = SCRIPT_ITEM(eap->line2)->sn_name;
+	    else
+	    {
+		expand_env(eap->arg, NameBuff, MAXPATHL);
+		eap->arg = NameBuff;
+	    }
 	    do_exedit(eap, NULL);
 	}
 	return;
     }
 
     for (i = 1; i <= script_items.ga_len && !got_int; ++i)
-	if (SCRIPT_ITEM(i)->sn_name != NULL)
+    {
+	scriptitem_T *si = SCRIPT_ITEM(i);
+
+	if (si->sn_name != NULL)
 	{
-	    home_replace(NULL, SCRIPT_ITEM(i)->sn_name,
-						    NameBuff, MAXPATHL, TRUE);
-	    smsg("%3d: %s", i, NameBuff);
+	    char sourced_buf[20];
+
+	    home_replace(NULL, si->sn_name, NameBuff, MAXPATHL, TRUE);
+	    if (si->sn_sourced_sid > 0)
+		vim_snprintf(sourced_buf, 20, "->%d", si->sn_sourced_sid);
+	    else
+		sourced_buf[0] = NUL;
+	    vim_snprintf((char *)IObuff, IOSIZE, "%3d%s%s: %s",
+		    i,
+		    sourced_buf,
+		    si->sn_state == SN_STATE_NOT_LOADED ? " A" : "",
+		    NameBuff);
+	    if (!message_filtered(IObuff))
+	    {
+		msg_putchar('\n');
+		msg_outtrans(IObuff);
+		out_flush();	    // output one line at a time
+		ui_breakcheck();
+	    }
 	}
+    }
 }
 
 # if defined(BACKSLASH_IN_FILENAME) || defined(PROTO)
@@ -1752,6 +1963,63 @@ get_sourced_lnum(
 			? ((source_cookie_T *)cookie)->sourcing_lnum
 			: SOURCING_LNUM;
 }
+
+/*
+ * getscriptinfo() function
+ */
+    void
+f_getscriptinfo(typval_T *argvars, typval_T *rettv)
+{
+    int		i;
+    list_T	*l;
+    char_u	*pat = NULL;
+    regmatch_T	regmatch;
+
+    if (rettv_list_alloc(rettv) == FAIL)
+	return;
+
+    if (check_for_opt_dict_arg(argvars, 0) == FAIL)
+	return;
+
+    l = rettv->vval.v_list;
+
+    regmatch.regprog = NULL;
+    regmatch.rm_ic = p_ic;
+
+    if (argvars[0].v_type == VAR_DICT)
+    {
+	pat = dict_get_string(argvars[0].vval.v_dict, "name", TRUE);
+	if (pat != NULL)
+	    regmatch.regprog = vim_regcomp(pat, RE_MAGIC + RE_STRING);
+    }
+
+    for (i = 1; i <= script_items.ga_len; ++i)
+    {
+	scriptitem_T	*si = SCRIPT_ITEM(i);
+	dict_T		*d;
+
+	if (si->sn_name == NULL)
+	    continue;
+
+	if (pat != NULL && regmatch.regprog != NULL
+		&& !vim_regexec(&regmatch, si->sn_name, (colnr_T)0))
+	    continue;
+
+	if ((d = dict_alloc()) == NULL
+		|| list_append_dict(l, d) == FAIL
+		|| dict_add_string(d, "name", si->sn_name) == FAIL
+		|| dict_add_number(d, "sid", i) == FAIL
+		|| dict_add_number(d, "sourced", si->sn_sourced_sid) == FAIL
+		|| dict_add_number(d, "version", si->sn_version) == FAIL
+		|| dict_add_bool(d, "autoload",
+				si->sn_state == SN_STATE_NOT_LOADED) == FAIL)
+	    return;
+    }
+
+    vim_regfree(regmatch.regprog);
+    vim_free(pat);
+}
+
 #endif
 
     static char_u *
@@ -1776,12 +2044,26 @@ get_one_sourceline(source_cookie_T *sp)
 	// make room to read at least 120 (more) characters
 	if (ga_grow(&ga, 120) == FAIL)
 	    break;
-	buf = (char_u *)ga.ga_data;
-
-	if (fgets((char *)buf + ga.ga_len, ga.ga_maxlen - ga.ga_len,
-							      sp->fp) == NULL)
-	    break;
-	len = ga.ga_len + (int)STRLEN(buf + ga.ga_len);
+	if (sp->source_from_buf)
+	{
+	    if (sp->buf_lnum >= sp->buflines.ga_len)
+		break;		    // all the lines are processed
+	    ga_concat(&ga, ((char_u **)sp->buflines.ga_data)[sp->buf_lnum]);
+	    sp->buf_lnum++;
+	    if (ga_grow(&ga, 1) == FAIL)
+		break;
+	    buf = (char_u *)ga.ga_data;
+	    buf[ga.ga_len++] = NUL;
+	    len = ga.ga_len;
+	}
+	else
+	{
+	    buf = (char_u *)ga.ga_data;
+	    if (fgets((char *)buf + ga.ga_len, ga.ga_maxlen - ga.ga_len,
+			sp->fp) == NULL)
+		break;
+	    len = ga.ga_len + (int)STRLEN(buf + ga.ga_len);
+	}
 #ifdef USE_CRNL
 	// Ignore a trailing CTRL-Z, when in Dos mode.	Only recognize the
 	// CTRL-Z by its own, or after a NL.
@@ -1883,7 +2165,7 @@ getsourceline(
 
 #ifdef FEAT_EVAL
     // If breakpoints have been added/deleted need to check for it.
-    if (sp->dbg_tick < debug_tick)
+    if ((sp->dbg_tick < debug_tick) && !sp->source_from_buf)
     {
 	sp->breakpoint = dbg_find_breakpoint(TRUE, sp->fname, SOURCING_LNUM);
 	sp->dbg_tick = debug_tick;
@@ -1899,7 +2181,7 @@ getsourceline(
 
     // Get current line.  If there is a read-ahead line, use it, otherwise get
     // one now.  "fp" is NULL if actually using a string.
-    if (sp->finished || sp->fp == NULL)
+    if (sp->finished || (!sp->source_from_buf && sp->fp == NULL))
 	line = NULL;
     else if (sp->nextline == NULL)
 	line = get_one_sourceline(sp);
@@ -2003,7 +2285,8 @@ getsourceline(
 
 #ifdef FEAT_EVAL
     // Did we encounter a breakpoint?
-    if (sp->breakpoint != 0 && sp->breakpoint <= SOURCING_LNUM)
+    if (!sp->source_from_buf && sp->breakpoint != 0
+	    && sp->breakpoint <= SOURCING_LNUM)
     {
 	dbg_breakpoint(sp->fname, SOURCING_LNUM);
 	// Find next breakpoint.
@@ -2016,6 +2299,16 @@ getsourceline(
 }
 
 /*
+ * Returns TRUE if sourcing a script either from a file or a buffer.
+ * Otherwise returns FALSE.
+ */
+    int
+sourcing_a_script(exarg_T *eap)
+{
+    return (getline_equal(eap->getline, eap->cookie, getsourceline));
+}
+
+/*
  * ":scriptencoding": Set encoding conversion for a sourced script.
  */
     void
@@ -2024,7 +2317,7 @@ ex_scriptencoding(exarg_T *eap)
     source_cookie_T	*sp;
     char_u		*name;
 
-    if (!getline_equal(eap->getline, eap->cookie, getsourceline))
+    if (!sourcing_a_script(eap))
     {
 	emsg(_(e_scriptencoding_used_outside_of_sourced_file));
 	return;
@@ -2055,7 +2348,7 @@ ex_scriptversion(exarg_T *eap UNUSED)
 {
     int		nr;
 
-    if (!getline_equal(eap->getline, eap->cookie, getsourceline))
+    if (!sourcing_a_script(eap))
     {
 	emsg(_(e_scriptversion_used_outside_of_sourced_file));
 	return;
@@ -2087,7 +2380,7 @@ ex_scriptversion(exarg_T *eap UNUSED)
     void
 ex_finish(exarg_T *eap)
 {
-    if (getline_equal(eap->getline, eap->cookie, getsourceline))
+    if (sourcing_a_script(eap))
 	do_finish(eap, FALSE);
     else
 	emsg(_(e_finish_used_outside_of_sourced_file));
@@ -2142,7 +2435,7 @@ source_finished(
  * Find the path of a script below the "autoload" directory.
  * Returns NULL if there is no "/autoload/" in the script name.
  */
-    char_u *
+    static char_u *
 script_name_after_autoload(scriptitem_T *si)
 {
     char_u	*p = si->sn_name;
@@ -2198,7 +2491,7 @@ get_autoload_prefix(scriptitem_T *si)
 
 /*
  * If in a Vim9 autoload script return "name" with the autoload prefix for the
- * script.  If successful "name" is freed, the returned name is allocated.
+ * script.  If successful the returned name is allocated.
  * Otherwise it returns "name" unmodified.
  */
     char_u *
@@ -2229,7 +2522,6 @@ may_prefix_autoload(char_u *name)
 	    {
 		vim_snprintf((char *)res, len, "%s%s",
 					     si->sn_autoload_prefix, basename);
-		vim_free(name);
 		return res;
 	    }
 	}
@@ -2276,6 +2568,18 @@ script_autoload(
     int		i;
     int		ret_sid;
 
+    // If the name starts with "<SNR>123_" then "123" is the script ID.
+    if (name[0] == K_SPECIAL && name[1] == KS_EXTRA && name[2] == KE_SNR)
+    {
+	p = name + 3;
+	ret_sid = (int)getdigits(&p);
+	if (*p == '_' && SCRIPT_ID_VALID(ret_sid))
+	{
+	    may_load_script(ret_sid, &ret);
+	    return ret;
+	}
+    }
+
     // If there is no '#' after name[0] there is no package name.
     p = vim_strchr(name, AUTOLOAD_CHAR);
     if (p == NULL || p == name)
@@ -2303,7 +2607,7 @@ script_autoload(
 
 	// Try loading the package from $VIMRUNTIME/autoload/<name>.vim
 	// Use "ret_sid" to avoid loading the same script again.
-	if (source_in_path(p_rtp, scriptname, 0, &ret_sid) == OK)
+	if (source_in_path(p_rtp, scriptname, DIP_START, &ret_sid) == OK)
 	    ret = TRUE;
     }
 

@@ -9,6 +9,7 @@ int mch_can_restore_icon(void);
 int mch_FullName(char_u *fname, char_u *buf, int len, int force);
 int mch_isFullName(char_u *fname);
 void slash_adjust(char_u *p);
+char_u *resolve_appexeclink(char_u *fname);
 int vim_stat(const char *name, stat_T *stp);
 void mch_settmode(tmode_T tmode);
 int mch_get_shellsize(void);

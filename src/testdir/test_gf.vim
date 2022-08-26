@@ -19,11 +19,7 @@ func Test_gf_url()
   call search("^second")
   call search("URL")
   call assert_equal("URL://machine.name/tmp/vimtest2b", expand("<cfile>"))
-  if has("ebcdic")
-      set isf=@,240-249,/,.,-,_,+,,,$,:,~,\
-  else
-      set isf=@,48-57,/,.,-,_,+,,,$,~,\
-  endif
+  set isf=@,48-57,/,.,-,_,+,,,$,~,\
   call search("^third")
   call search("name")
   call assert_equal("URL:\\\\machine.name\\vimtest2c", expand("<cfile>"))
@@ -90,11 +86,7 @@ endfunc
 
 " Test for invoking 'gf' on a ${VAR} variable
 func Test_gf()
-  if has("ebcdic")
-    set isfname=@,240-249,/,.,-,_,+,,,$,:,~,{,}
-  else
-    set isfname=@,48-57,/,.,-,_,+,,,$,:,~,{,}
-  endif
+  set isfname=@,48-57,/,.,-,_,+,,,$,:,~,{,}
 
   call writefile(["Test for gf command"], "Xtest1")
   if has("unix")
@@ -145,6 +137,21 @@ func Test_gf_visual()
   norm! 0ttvt:gF
   call assert_equal('Xtest_gf_visual', bufname('%'))
   call assert_equal(3, getcurpos()[1])
+
+  " do not include the NUL at the end
+  call writefile(['x'], 'X')
+  let save_enc = &enc
+  for enc in ['latin1', 'utf-8']
+    exe "set enc=" .. enc
+    new
+    call setline(1, 'X')
+    set nomodified
+    exe "normal \<C-V>$gf"
+    call assert_equal('X', bufname())
+    bwipe!
+  endfor
+  let &enc = save_enc
+  call delete('X')
 
   " line number in visual area is used for file name
   if has('unix')
@@ -241,6 +248,29 @@ func Test_includeexpr_scriptlocal_func()
   set includeexpr&
   delfunc s:IncludeFunc
   bw!
+endfunc
+
+" Check that expanding directories can handle more than 255 entries.
+func Test_gf_subdirs_wildcard()
+  let cwd = getcwd()
+  let dir = 'Xtestgf_dir'
+  call mkdir(dir)
+  call chdir(dir)
+  for i in range(300)
+    call mkdir(i)
+    call writefile([], i .. '/' .. i, 'S')
+  endfor
+  set path=./**
+
+  new | only
+  call setline(1, '99')
+  w! Xtest1
+  normal gf
+  call assert_equal('99', fnamemodify(bufname(''), ":t"))
+
+  call chdir(cwd)
+  call delete(dir, 'rf')
+  set path&
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

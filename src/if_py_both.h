@@ -30,9 +30,9 @@ static const char *vim_special_path = "_vim_path_";
 #define PyErr_FORMAT2(exc, str, arg1, arg2) PyErr_Format(exc, _(str), arg1,arg2)
 #define PyErr_VIM_FORMAT(str, arg) PyErr_FORMAT(VimError, str, arg)
 
-#define Py_TYPE_NAME(obj) (obj->ob_type->tp_name == NULL \
+#define Py_TYPE_NAME(obj) ((obj)->ob_type->tp_name == NULL \
 	? "(NULL)" \
-	: obj->ob_type->tp_name)
+	: (obj)->ob_type->tp_name)
 
 #define RAISE_NO_EMPTY_KEYS PyErr_SET_STRING(PyExc_ValueError, \
 					    N_("empty keys are not allowed"))
@@ -697,7 +697,7 @@ VimCommand(PyObject *self UNUSED, PyObject *string)
 
     VimTryStart();
     do_cmdline_cmd(cmd);
-    update_screen(VALID);
+    update_screen(UPD_VALID);
 
     Python_Release_Vim();
     Py_END_ALLOW_THREADS
@@ -4067,7 +4067,7 @@ WindowSetattr(WindowObject *self, char *name, PyObject *valObject)
 	// When column is out of range silently correct it.
 	check_cursor_col_win(self->win);
 
-	update_screen(VALID);
+	update_screen(UPD_VALID);
 	return 0;
     }
     else if (strcmp(name, "height") == 0)
@@ -4676,9 +4676,11 @@ SetBufferLineList(
 	// Only adjust marks if we managed to switch to a window that holds
 	// the buffer, otherwise line numbers will be invalid.
 	if (save_curbuf.br_buf == NULL)
+	{
 	    mark_adjust((linenr_T)lo, (linenr_T)(hi - 1),
 						  (long)MAXLNUM, (long)extra);
-	changed_lines((linenr_T)lo, 0, (linenr_T)hi, (long)extra);
+	    changed_lines((linenr_T)lo, 0, (linenr_T)hi, (long)extra);
+	}
 
 	if (buf == curbuf && (switchwin.sw_curwin != NULL
 					   || save_curbuf.br_buf == NULL))
@@ -4743,7 +4745,7 @@ InsertBufferLines(buf_T *buf, PyInt n, PyObject *lines, PyInt *len_change)
 
 	vim_free(str);
 	restore_win_for_buf(&switchwin, &save_curbuf);
-	update_screen(VALID);
+	update_screen(UPD_VALID);
 
 	if (VimTryEnd())
 	    return FAIL;
@@ -4814,7 +4816,7 @@ InsertBufferLines(buf_T *buf, PyInt n, PyObject *lines, PyInt *len_change)
 	PyMem_Free(array);
 	restore_win_for_buf(&switchwin, &save_curbuf);
 
-	update_screen(VALID);
+	update_screen(UPD_VALID);
 
 	if (VimTryEnd())
 	    return FAIL;
@@ -5823,7 +5825,7 @@ out:
     if (status)
 	return;
     check_cursor();
-    update_curbuf(NOT_VALID);
+    update_curbuf(UPD_NOT_VALID);
 }
 
     static void
@@ -6686,7 +6688,7 @@ init_structs(void)
 }
 
 #define PYTYPE_READY(type) \
-    if (PyType_Ready(&type)) \
+    if (PyType_Ready(&(type))) \
 	return -1;
 
     static int
@@ -6954,7 +6956,7 @@ populate_module(PyObject *m)
     {
 	// find_module() is deprecated, this may stop working in some later
 	// version.
-        ADD_OBJECT(m, "_find_module", py_find_module);
+	ADD_OBJECT(m, "_find_module", py_find_module);
     }
 
     Py_DECREF(imp);

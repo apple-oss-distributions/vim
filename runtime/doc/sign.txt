@@ -1,4 +1,4 @@
-*sign.txt*      For Vim version 8.2.  Last change: 2021 Dec 05
+*sign.txt*      For Vim version 9.0.  Last change: 2021 Dec 05
 
 
 		  VIM REFERENCE MANUAL    by Gordon Prieur
@@ -101,7 +101,7 @@ precedence, otherwise the 'cursorline' highlighting.
 Here is an example that places a sign "piet", displayed with the text ">>", in
 line 23 of the current file: >
 	:sign define piet text=>> texthl=Search
-	:exe ":sign place 2 line=23 name=piet file=" . expand("%:p")
+	:exe ":sign place 2 line=23 name=piet file=" .. expand("%:p")
 
 And here is the command to delete it again: >
 	:sign unplace 2

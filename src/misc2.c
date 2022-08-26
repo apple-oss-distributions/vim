@@ -30,8 +30,9 @@ virtual_active(void)
     if (virtual_op != MAYBE)
 	return virtual_op;
     return (cur_ve_flags == VE_ALL
-	    || ((cur_ve_flags & VE_BLOCK) && VIsual_active && VIsual_mode == Ctrl_V)
-	    || ((cur_ve_flags & VE_INSERT) && (State & INSERT)));
+	    || ((cur_ve_flags & VE_BLOCK) && VIsual_active
+						      && VIsual_mode == Ctrl_V)
+	    || ((cur_ve_flags & VE_INSERT) && (State & MODE_INSERT)));
 }
 
 /*
@@ -127,7 +128,6 @@ coladvance2(
 {
     colnr_T	wcol = wcol_arg;
     int		idx;
-    char_u	*ptr;
     char_u	*line;
     colnr_T	col = 0;
     int		csize = 0;
@@ -136,7 +136,7 @@ coladvance2(
     int		head = 0;
 #endif
 
-    one_more = (State & INSERT)
+    one_more = (State & MODE_INSERT)
 		    || restart_edit != NUL
 		    || (VIsual_active && *p_sel != 'o')
 		    || ((get_ve_flags() & VE_ONEMORE) && wcol < MAXCOL);
@@ -157,6 +157,7 @@ coladvance2(
     else
     {
 	int width = curwin->w_width - win_col_off(curwin);
+	chartabsize_T cts;
 
 	if (finetune
 		&& curwin->w_p_wrap
@@ -169,7 +170,7 @@ coladvance2(
 		csize--;
 
 	    if (wcol / width > (colnr_T)csize / width
-		    && ((State & INSERT) == 0 || (int)wcol > csize + 1))
+		    && ((State & MODE_INSERT) == 0 || (int)wcol > csize + 1))
 	    {
 		// In case of line wrapping don't move the cursor beyond the
 		// right screen edge.  In Insert mode allow going just beyond
@@ -179,19 +180,22 @@ coladvance2(
 	    }
 	}
 
-	ptr = line;
-	while (col <= wcol && *ptr != NUL)
+	init_chartabsize_arg(&cts, curwin, pos->lnum, 0, line, line);
+	while (cts.cts_vcol <= wcol && *cts.cts_ptr != NUL)
 	{
 	    // Count a tab for what it's worth (if list mode not on)
 #ifdef FEAT_LINEBREAK
-	    csize = win_lbr_chartabsize(curwin, line, ptr, col, &head);
-	    MB_PTR_ADV(ptr);
+	    csize = win_lbr_chartabsize(&cts, &head);
+	    MB_PTR_ADV(cts.cts_ptr);
 #else
-	    csize = lbr_chartabsize_adv(line, &ptr, col);
+	    csize = lbr_chartabsize_adv(&cts);
 #endif
-	    col += csize;
+	    cts.cts_vcol += csize;
 	}
-	idx = (int)(ptr - line);
+	col = cts.cts_vcol;
+	idx = (int)(cts.cts_ptr - line);
+	clear_chartabsize_arg(&cts);
+
 	/*
 	 * Handle all the special cases.  The virtual_active() check
 	 * is needed to ensure that a virtual position off the end of
@@ -566,7 +570,7 @@ check_cursor_col_win(win_T *win)
 	// - in Insert mode or restarting Insert mode
 	// - in Visual mode and 'selection' isn't "old"
 	// - 'virtualedit' is set
-	if ((State & INSERT) || restart_edit
+	if ((State & MODE_INSERT) || restart_edit
 		|| (VIsual_active && *p_sel != 'o')
 		|| (cur_ve_flags & VE_ONEMORE)
 		|| virtual_active())
@@ -596,7 +600,7 @@ check_cursor_col_win(win_T *win)
 	    // Make sure that coladd is not more than the char width.
 	    // Not for the last character, coladd is then used when the cursor
 	    // is actually after the last character.
-	    if (win->w_cursor.col + 1 < len && win->w_cursor.coladd > 0)
+	    if (win->w_cursor.col + 1 < len)
 	    {
 		int cs, ce;
 
@@ -621,7 +625,31 @@ check_cursor(void)
     check_cursor_col();
 }
 
-#if defined(FEAT_TEXTOBJ) || defined(PROTO)
+/*
+ * Check if VIsual position is valid, correct it if not.
+ * Can be called when in Visual mode and a change has been made.
+ */
+    void
+check_visual_pos(void)
+{
+    if (VIsual.lnum > curbuf->b_ml.ml_line_count)
+    {
+	VIsual.lnum = curbuf->b_ml.ml_line_count;
+	VIsual.col = 0;
+	VIsual.coladd = 0;
+    }
+    else
+    {
+	int len = (int)STRLEN(ml_get(VIsual.lnum));
+
+	if (VIsual.col > len)
+	{
+	    VIsual.col = len;
+	    VIsual.coladd = 0;
+	}
+    }
+}
+
 /*
  * Make sure curwin->w_cursor is not on the NUL at the end of the line.
  * Allow it when in Visual mode and 'selection' is not "old".
@@ -634,7 +662,6 @@ adjust_cursor_col(void)
 	    && gchar_cursor() == NUL)
 	--curwin->w_cursor.col;
 }
-#endif
 
 /*
  * When curwin->w_leftcol has changed, adjust the cursor position.
@@ -646,7 +673,7 @@ leftcol_changed(void)
     long	lastcol;
     colnr_T	s, e;
     int		retval = FALSE;
-    long        siso = get_sidescrolloff_value();
+    long	siso = get_sidescrolloff_value();
 
     changed_cline_bef_curs();
     lastcol = curwin->w_leftcol + curwin->w_width - curwin_col_off() - 1;
@@ -690,7 +717,7 @@ leftcol_changed(void)
 
     if (retval)
 	curwin->w_set_curswant = TRUE;
-    redraw_later(NOT_VALID);
+    redraw_later(UPD_NOT_VALID);
     return retval;
 }
 
@@ -1201,11 +1228,7 @@ get_special_key_name(int c, int modifiers)
 	}
 	if (table_idx < 0 && !vim_isprintc(c) && c < ' ')
 	{
-#ifdef EBCDIC
-	    c = CtrlChar(c);
-#else
 	    c += '@';
-#endif
 	    modifiers |= MOD_MASK_CTRL;
 	}
     }
@@ -1269,6 +1292,7 @@ trans_special(
     char_u	**srcp,
     char_u	*dst,
     int		flags,		// FSK_ values
+    int		escape_ks,	// escape K_SPECIAL bytes in the character
     int		*did_simplify)  // FSK_SIMPLIFY and found <C-H> or <A-x>
 {
     int		modifiers = 0;
@@ -1278,18 +1302,18 @@ trans_special(
     if (key == 0)
 	return 0;
 
-    return special_to_buf(key, modifiers, flags & FSK_KEYCODE, dst);
+    return special_to_buf(key, modifiers, escape_ks, dst);
 }
 
 /*
  * Put the character sequence for "key" with "modifiers" into "dst" and return
  * the resulting length.
- * When "keycode" is TRUE prefer key code, e.g. K_DEL instead of DEL.
+ * When "escape_ks" is TRUE escape K_SPECIAL bytes in the character.
  * The sequence is not NUL terminated.
  * This is how characters in a string are encoded.
  */
     int
-special_to_buf(int key, int modifiers, int keycode, char_u *dst)
+special_to_buf(int key, int modifiers, int escape_ks, char_u *dst)
 {
     int		dlen = 0;
 
@@ -1307,10 +1331,10 @@ special_to_buf(int key, int modifiers, int keycode, char_u *dst)
 	dst[dlen++] = KEY2TERMCAP0(key);
 	dst[dlen++] = KEY2TERMCAP1(key);
     }
-    else if (has_mbyte && !keycode)
-	dlen += (*mb_char2bytes)(key, dst + dlen);
-    else if (keycode)
+    else if (escape_ks)
 	dlen = (int)(add_char2buf(key, dst + dlen) - dst);
+    else if (has_mbyte)
+	dlen += (*mb_char2bytes)(key, dst + dlen);
     else
 	dst[dlen++] = key;
 
@@ -1560,21 +1584,12 @@ extract_modifiers(int key, int *modp, int simplify, int *did_simplify)
 	key = TOUPPER_ASC(key);
 
     if (simplify && (modifiers & MOD_MASK_CTRL)
-#ifdef EBCDIC
-	    // TODO: EBCDIC Better use:
-	    // && (Ctrl_chr(key) || key == '?')
-	    // ???
-	    && strchr("?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_", key)
-						       != NULL
-#else
-	    && ((key >= '?' && key <= '_') || ASCII_ISALPHA(key))
-#endif
-	    )
+	    && ((key >= '?' && key <= '_') || ASCII_ISALPHA(key)))
     {
 	key = Ctrl_chr(key);
 	modifiers &= ~MOD_MASK_CTRL;
 	// <C-@> is <Nul>
-	if (key == 0)
+	if (key == NUL)
 	    key = K_ZERO;
 	if (did_simplify != NULL)
 	    *did_simplify = TRUE;
@@ -1848,22 +1863,23 @@ call_shell(char_u *cmd, int opt)
 }
 
 /*
- * VISUAL, SELECTMODE and OP_PENDING State are never set, they are equal to
- * NORMAL State with a condition.  This function returns the real State.
+ * MODE_VISUAL, MODE_SELECT and MODE_OP_PENDING State are never set, they are
+ * equal to MODE_NORMAL State with a condition.  This function returns the real
+ * State.
  */
     int
 get_real_state(void)
 {
-    if (State & NORMAL)
+    if (State & MODE_NORMAL)
     {
 	if (VIsual_active)
 	{
 	    if (VIsual_select)
-		return SELECTMODE;
-	    return VISUAL;
+		return MODE_SELECT;
+	    return MODE_VISUAL;
 	}
 	else if (finish_op)
-	    return OP_PENDING;
+	    return MODE_OP_PENDING;
     }
     return State;
 }
@@ -1916,7 +1932,6 @@ vim_chdirfile(char_u *fname, char *trigger_autocmd)
 {
     char_u	old_dir[MAXPATHL];
     char_u	new_dir[MAXPATHL];
-    int		res;
 
     if (mch_dirname(old_dir, MAXPATHL) != OK)
 	*old_dir = NUL;
@@ -1926,16 +1941,18 @@ vim_chdirfile(char_u *fname, char *trigger_autocmd)
 
     if (pathcmp((char *)old_dir, (char *)new_dir, -1) == 0)
 	// nothing to do
-	res = OK;
-    else
-    {
-	res = mch_chdir((char *)new_dir) == 0 ? OK : FAIL;
+	return OK;
 
-	if (res == OK && trigger_autocmd != NULL)
-	    apply_autocmds(EVENT_DIRCHANGED, (char_u *)trigger_autocmd,
+    if (trigger_autocmd != NULL)
+	trigger_DirChangedPre((char_u *)trigger_autocmd, new_dir);
+
+    if (mch_chdir((char *)new_dir) != 0)
+	return FAIL;
+
+    if (trigger_autocmd != NULL)
+	apply_autocmds(EVENT_DIRCHANGED, (char_u *)trigger_autocmd,
 						       new_dir, FALSE, curbuf);
-    }
-    return res;
+    return OK;
 }
 #endif
 
@@ -2282,7 +2299,7 @@ parse_shape_opt(int what)
 get_shape_idx(int mouse)
 {
 #ifdef FEAT_MOUSESHAPE
-    if (mouse && (State == HITRETURN || State == ASKMORE))
+    if (mouse && (State == MODE_HITRETURN || State == MODE_ASKMORE))
     {
 # ifdef FEAT_GUI
 	int x, y;
@@ -2297,15 +2314,15 @@ get_shape_idx(int mouse)
     if (mouse && drag_sep_line)
 	return SHAPE_IDX_VDRAG;
 #endif
-    if (!mouse && State == SHOWMATCH)
+    if (!mouse && State == MODE_SHOWMATCH)
 	return SHAPE_IDX_SM;
     if (State & VREPLACE_FLAG)
 	return SHAPE_IDX_R;
     if (State & REPLACE_FLAG)
 	return SHAPE_IDX_R;
-    if (State & INSERT)
+    if (State & MODE_INSERT)
 	return SHAPE_IDX_I;
-    if (State & CMDLINE)
+    if (State & MODE_CMDLINE)
     {
 	if (cmdline_at_end())
 	    return SHAPE_IDX_C;
@@ -2382,15 +2399,12 @@ update_mouseshape(int shape_idx)
 
 
 /*
- * Change directory to "new_dir".  If FEAT_SEARCHPATH is defined, search
- * 'cdpath' for relative directory names, otherwise just mch_chdir().
+ * Change directory to "new_dir".  Search 'cdpath' for relative directory
+ * names, otherwise just mch_chdir().
  */
     int
 vim_chdir(char_u *new_dir)
 {
-#ifndef FEAT_SEARCHPATH
-    return mch_chdir((char *)new_dir);
-#else
     char_u	*dir_name;
     int		r;
 
@@ -2401,7 +2415,6 @@ vim_chdir(char_u *new_dir)
     r = mch_chdir((char *)dir_name);
     vim_free(dir_name);
     return r;
-#endif
 }
 
 /*
@@ -2425,7 +2438,7 @@ get_user_name(char_u *buf, int len)
     return OK;
 }
 
-#if defined(EXITFREE) || defined(PROTOS)
+#if defined(EXITFREE) || defined(PROTO)
 /*
  * Free the memory allocated by get_user_name()
  */
@@ -2902,7 +2915,6 @@ mch_parse_cmd(char_u *cmd, int use_shcf, char ***argv, int *argc)
     return OK;
 }
 
-# if defined(FEAT_JOB_CHANNEL) || defined(PROTO)
 /*
  * Build "argv[argc]" from the string "cmd".
  * "argv[argc]" is set to NULL;
@@ -2929,6 +2941,7 @@ build_argv_from_string(char_u *cmd, char ***argv, int *argc)
     return OK;
 }
 
+# if defined(FEAT_JOB_CHANNEL) || defined(PROTO)
 /*
  * Build "argv[argc]" from the list "l".
  * "argv[argc]" is set to NULL;

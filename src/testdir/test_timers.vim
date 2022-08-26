@@ -298,8 +298,9 @@ func Interrupt(timer)
 endfunc
 
 func Test_timer_peek_and_get_char()
-  CheckUnix
-  CheckGui
+  if !has('unix') && !has('gui_running')
+    throw 'Skipped: cannot feed low-level input'
+  endif
 
   call timer_start(0, 'FeedAndPeek')
   let intr = timer_start(100, 'Interrupt')
@@ -310,7 +311,7 @@ endfunc
 
 func Test_timer_getchar_zero()
   if has('win32') && !has('gui_running')
-    throw 'Skipped: cannot get low-level input'
+    throw 'Skipped: cannot feed low-level input'
   endif
   CheckFunction reltimefloat
 
@@ -368,7 +369,7 @@ endfunc
 
 " Test that the garbage collector isn't triggered if a timer callback invokes
 " vgetc().
-func Test_timer_nocatch_garbage_collect()
+func Test_nocatch_timer_garbage_collect()
   " 'uptimetime. must be bigger than the timer timeout
   set ut=200
   call test_garbagecollect_soon()
@@ -482,6 +483,29 @@ func Test_timer_outputting_message()
 
   call StopVimInTerminal(buf)
   call delete('XTest_timermessage')
+endfunc
+
+func Test_timer_using_win_execute_undo_sync()
+  let bufnr1 = bufnr()
+  new
+  let g:bufnr2 = bufnr()
+  let g:winid = win_getid()
+  exe "buffer " .. bufnr1
+  wincmd w
+  call setline(1, ['test'])
+  autocmd InsertEnter * call timer_start(100, { -> win_execute(g:winid, 'buffer ' .. g:bufnr2) })
+  call timer_start(200, { -> feedkeys("\<CR>bbbb\<Esc>") })
+  call feedkeys("Oaaaa", 'x!t')
+  " will hang here until the second timer fires
+  call assert_equal(['aaaa', 'bbbb', 'test'], getline(1, '$'))
+  undo
+  call assert_equal(['test'], getline(1, '$'))
+
+  bwipe!
+  bwipe!
+  unlet g:winid
+  unlet g:bufnr2
+  au! InsertEnter
 endfunc
 
 

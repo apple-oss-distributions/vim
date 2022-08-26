@@ -75,6 +75,18 @@ func Test_for_invalid()
   redraw
 endfunc
 
+func Test_for_over_null_string()
+  let save_enc = &enc
+  set enc=iso8859
+  let cnt = 0
+  for c in test_null_string()
+    let cnt += 1
+  endfor
+  call assert_equal(0, cnt)
+
+  let &enc = save_enc
+endfunc
+
 func Test_readfile_binary()
   new
   call setline(1, ['one', 'two', 'three'])
@@ -589,5 +601,36 @@ func Test_curly_assignment()
   unlet s:gvar
   unlet g:gvar
 endfunc
+
+func Test_deep_recursion()
+  " this was running out of stack
+  call assert_fails("exe 'if ' .. repeat('(', 1002)", 'E1169: Expression too recursive: ((')
+endfunc
+
+" K_SPECIAL in the modified character used be escaped, which causes
+" double-escaping with feedkeys() or as the return value of an <expr> mapping,
+" and doesn't match what getchar() returns,
+func Test_modified_char_no_escape_special()
+  nnoremap <M-…> <Cmd>let g:got_m_ellipsis += 1<CR>
+  call feedkeys("\<M-…>", 't')
+  call assert_equal("\<M-…>", getchar())
+  let g:got_m_ellipsis = 0
+  call feedkeys("\<M-…>", 'xt')
+  call assert_equal(1, g:got_m_ellipsis)
+  func Func()
+    return "\<M-…>"
+  endfunc
+  nmap <expr> <F2> Func()
+  call feedkeys("\<F2>", 'xt')
+  call assert_equal(2, g:got_m_ellipsis)
+  delfunc Func
+  nunmap <F2>
+  unlet g:got_m_ellipsis
+  nunmap <M-…>
+endfunc
+
+func Test_eval_string_in_special_key()
+  " this was using the '{' inside <> as the start of an interpolated string
+  silent! echo 0{1-$"\<S--{>n|nö%endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

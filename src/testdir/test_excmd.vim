@@ -580,10 +580,12 @@ endfunc
 
 " Test for the :verbose command
 func Test_verbose_cmd()
-  call assert_equal(['  verbose=1'], split(execute('verbose set vbs'), "\n"))
+  set verbose=3
+  call assert_match('  verbose=1\n\s*Last set from ', execute('verbose set vbs'), "\n")
   call assert_equal(['  verbose=0'], split(execute('0verbose set vbs'), "\n"))
-  let l = execute("4verbose set verbose | set verbose")
-  call assert_equal(['  verbose=4', '  verbose=0'], split(l, "\n"))
+  set verbose=0
+  call assert_match('  verbose=4\n\s*Last set from .*\n  verbose=0',
+        \ execute("4verbose set verbose | set verbose"))
 endfunc
 
 " Test for the :delete command and the related abbreviated commands
@@ -712,6 +714,30 @@ func Test_address_line_overflow()
   yank 77777777777777777777
   call assert_equal("99\n", @")
 
+  bwipe!
+endfunc
+
+" This was leaving the cursor in line zero
+func Test_using_zero_in_range()
+  new
+  norm o00
+  silent!  0;s/\%')
+  bwipe!
+endfunc
+
+" Test :write after changing name with :file and loading it with :edit
+func Test_write_after_rename()
+  call writefile(['text'], 'Xfile')
+
+  enew
+  file Xfile
+  call assert_fails('write', 'E13: File exists (add ! to override)')
+
+  " works OK after ":edit"
+  edit
+  write
+
+  call delete('Xfile')
   bwipe!
 endfunc
 

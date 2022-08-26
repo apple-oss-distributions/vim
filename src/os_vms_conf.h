@@ -65,17 +65,8 @@
 // Define if you have the nanosleep() function.
 // #undef HAVE_NANOSLEEP
 
-// Define if you can safely include both <sys/time.h> and <time.h>.
-#define TIME_WITH_SYS_TIME
-
 // Define if you can safely include both <sys/time.h> and <sys/select.h>.
 // #undef SYS_SELECT_WITH_SYS_TIME
-
-// Define as the return type of signal handlers (int or void).
-#define RETSIGTYPE void
-
-// Define as the command at the end of signal handlers ("" or "return 0;").
-#define SIGRETURN return
 
 // Define if struct sigcontext is present
 #define HAVE_SIGCONTEXT
@@ -208,7 +199,7 @@
 
 // GUI support defines
 #if defined(FEAT_GUI_MOTIF) || defined(FEAT_GUI_GTK)
-#define X_INCLUDE_GRP_H             // To use getgrgid
+#define X_INCLUDE_GRP_H		// To use getgrgid
 #define XUSE_MTSAFE_API
 #define HAVE_X11
 #define WANT_X11

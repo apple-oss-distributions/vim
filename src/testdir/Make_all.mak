@@ -87,6 +87,7 @@ NEW_TESTS = \
 	test_clientserver \
 	test_close_count \
 	test_cmdline \
+	test_cmdwin \
 	test_command_count \
 	test_comments \
 	test_comparators \
@@ -124,7 +125,6 @@ NEW_TESTS = \
 	test_expand_func \
 	test_expr \
 	test_expr_utf8 \
-	test_feedkeys \
 	test_file_perm \
 	test_file_size \
 	test_filechanged \
@@ -163,6 +163,7 @@ NEW_TESTS = \
 	test_increment \
 	test_increment_dbcs \
 	test_indent \
+	test_input \
 	test_ins_complete \
 	test_ins_complete_no_halt \
 	test_interrupt \
@@ -170,7 +171,6 @@ NEW_TESTS = \
 	test_join \
 	test_json \
 	test_jumplist \
-	test_jumps \
 	test_lambda \
 	test_langmap \
 	test_largefile \
@@ -185,7 +185,7 @@ NEW_TESTS = \
 	test_lua \
 	test_makeencoding \
 	test_man \
-	test_maparg \
+	test_map_functions \
 	test_mapping \
 	test_marks \
 	test_match \
@@ -346,6 +346,7 @@ NEW_TESTS_RES = \
 	test_clientserver.res \
 	test_close_count.res \
 	test_cmdline.res \
+	test_cmdwin.res \
 	test_command_count.res \
 	test_comments.res \
 	test_comparators.res \
@@ -407,6 +408,7 @@ NEW_TESTS_RES = \
 	test_increment.res \
 	test_increment_dbcs.res \
 	test_indent.res \
+	test_input.res \
 	test_ins_complete.res \
 	test_ins_complete_no_halt.res \
 	test_interrupt.res \
@@ -426,7 +428,7 @@ NEW_TESTS_RES = \
 	test_lua.res \
 	test_makeencoding.res \
 	test_man.res \
-	test_maparg.res \
+	test_map_functions.res \
 	test_mapping.res \
 	test_marks.res \
 	test_match.res \

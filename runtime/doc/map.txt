@@ -1,4 +1,4 @@
-*map.txt*       For Vim version 8.2.  Last change: 2022 Jan 15
+*map.txt*       For Vim version 9.0.  Last change: 2022 Jun 18
 
 
 		  VIM REFERENCE MANUAL    by Bram Moolenaar
@@ -63,6 +63,7 @@ modes.
 			allows for nested and recursive use of mappings.
 			Note: Trailing spaces are included in the {rhs},
 			because space is a valid Normal mode command.
+			See |map-trailing-white|.
 
 						*:nore* *:norem*
 :no[remap]  {lhs} {rhs}		|mapmode-nvo|	*:no*  *:noremap* *:nor*
@@ -80,6 +81,8 @@ modes.
 			where the map command applies.  Disallow mapping of
 			{rhs}, to avoid nested and recursive mappings.  Often
 			used to redefine a command.
+			Note: When <Plug> appears in the {rhs} this part is
+			always applied even if remapping is disallowed.
 
 
 :unm[ap]  {lhs}			|mapmode-nvo|		*:unm*  *:unmap*
@@ -98,10 +101,8 @@ modes.
 			for other modes where it applies.
 			It also works when {lhs} matches the {rhs} of a
 			mapping. This is for when an abbreviation applied.
-			Note: Trailing spaces are included in the {lhs}.  This
-			unmap does NOT work: >
-				:map @@ foo
-				:unmap @@ | print
+			Note: Trailing spaces are included in the {lhs}.
+			See |map-trailing-white|.
 
 :mapc[lear]			|mapmode-nvo|		*:mapc*   *:mapclear*
 :nmapc[lear]			|mapmode-n|		*:nmapc*  *:nmapclear*
@@ -118,7 +119,8 @@ modes.
 			command applies.
 			Use the <buffer> argument to remove buffer-local
 			mappings |:map-<buffer>|
-			Warning: This also removes the default mappings.
+			Warning: This also removes the |mac-standard-mappings|
+			and the |dos-standard-mappings|.
 
 :map				|mapmode-nvo|
 :nm[ap]				|mapmode-n|
@@ -165,6 +167,27 @@ that mapping won't get expanded yet, Vim is waiting for another character.
 If you type a space, then "foo" will get inserted, plus the space.  If you
 type "a", then "bar" will get inserted.
 
+Trailing white space ~
+							*map-trailing-white*
+This unmap command does NOT work: >
+	:map @@ foo
+	:unmap @@ | print
+
+Because it tries to unmap "@@ ", including the white space before the command
+separator "|".  Other examples with trailing white space: >
+	unmap @@ 
+	unmap @@     # Vim9 script comment
+	unmap @@     " legacy script comment
+
+An error will be issued, which is very hard to identify, because the ending
+whitespace character in `unmap @@ ` is not visible.
+
+A generic solution is to put the command separator "|" right after the mapped
+keys.  After that white space and a comment may follow: >
+
+	unmap @@|    # Vim9 script comment
+	unmap @@|    " legacy script comment
+
 
 1.2 SPECIAL ARGUMENTS					*:map-arguments*
 
@@ -172,7 +195,8 @@ type "a", then "bar" will get inserted.
 "<unique>" can be used in any order.  They must appear right after the
 command, before any other arguments.
 
-			*:map-local* *:map-<buffer>* *:map-buffer* *E224* *E225*
+				    *:map-local* *:map-<buffer>* *:map-buffer*
+				    *E224* *E225*
 If the first argument to one of these commands is "<buffer>" the mapping will
 be effective in the current buffer only.  Example: >
 	:map <buffer>  ,w  /[.,;]<CR>
@@ -314,7 +338,7 @@ Here is an example that inserts a list number that increases: >
 
 	func ListItem()
 	  let g:counter += 1
-	  return g:counter . '. '
+	  return g:counter .. '. '
 	endfunc
 
 	func ListReset()
@@ -350,15 +374,17 @@ command: it is executed as if an (unrestricted) |autocommand| was invoked.
 <ScriptCmd> is like <Cmd> but sets the context to the script the mapping was
 defined in, for the duration of the command execution.  This is especially
 useful for |Vim9| script.  It also works to access an import, which is useful
-in a plugin using an autoload script: >
+in a plugin using a, possibly autoloaded, script: >
 	vim9script
 	import autoload 'implementation.vim' as impl
 	nnoremap <F4> <ScriptCmd>impl.DoTheWork()<CR>
-
+<
 No matter where <F4> is typed, the "impl" import will be found in the script
-context of where the mapping was defined.  And since it's an autoload import,
-the "implementation.vim" script will only be loaded once <F4> is typed, not
-when the mapping is defined.
+context of where the mapping was defined.  When it's an autoload import, as in
+the example, the "implementation.vim" script will only be loaded once <F4> is
+typed, not when the mapping is defined.
+
+Without <ScriptCmd> using "s:impl" would result in "E121: Undefined variable".
 
 Note:
 - Because <Cmd> and <ScriptCmd> avoid mode-changes it does not trigger
@@ -371,8 +397,6 @@ Note:
   mapping is recursive.
 - In Visual mode  you can use `line('v')` and `col('v')` to get one end of the
   Visual area, the cursor is at the other end.
-- In Select mode, |:map| and |:vmap| command mappings are executed in
-  Visual mode.  Use |:smap| to handle Select mode differently.
 
 							*E1255* *E1136*
 <Cmd> and <ScriptCmd> commands must terminate, that is, they must be followed
@@ -387,7 +411,7 @@ contain special characters like function keys.
 1.3 MAPPING AND MODES					*:map-modes*
 			*mapmode-nvo* *mapmode-n* *mapmode-v* *mapmode-o*
 
-There are six sets of mappings
+There are seven sets of mappings
 - For Normal mode: When typing commands.
 - For Visual mode: When typing commands while the Visual area is highlighted.
 - For Select mode: like Visual mode but typing text replaces the selection.
@@ -395,6 +419,7 @@ There are six sets of mappings
   etc.).  See below: |omap-info|.
 - For Insert mode.  These are also used in Replace mode.
 - For Command-line mode: When entering a ":" or "/" command.
+- For Terminal mode: When typing in a |:terminal| buffer.
 
 Special case: While typing a count for a command in Normal mode, mapping zero
 is disabled.  This makes it possible to map zero without making it impossible
@@ -657,19 +682,22 @@ two bytes 0xc3 0xa1.  You don't want the 0xc3 byte to be mapped then or
 otherwise it would be impossible to type the á character.
 
 					*<Leader>* *mapleader*
-To define a mapping which uses the "mapleader" variable, the special string
-"<Leader>" can be used.  It is replaced with the string value of "mapleader".
-If "mapleader" is not set or empty, a backslash is used instead.  Example: >
-	:map <Leader>A  oanother line<Esc>
+To define a mapping which uses the "g:mapleader" variable, the special string
+"<Leader>" can be used.  It is replaced with the string value of
+"g:mapleader".  If "g:mapleader" is not set or empty, a backslash is used
+instead.  Example: >
+	map <Leader>A  oanother line<Esc>
 Works like: >
-	:map \A  oanother line<Esc>
-But after: >
-	:let mapleader = ","
+	map \A  oanother line<Esc>
+But after (legacy script): >
+	let mapleader = ","
+Or (Vim9 script): >
+	g:mapleader = ","
 It works like: >
-	:map ,A  oanother line<Esc>
+	map ,A  oanother line<Esc>
 
-Note that the value of "mapleader" is used at the moment the mapping is
-defined.  Changing "mapleader" after that has no effect for already defined
+Note that the value of "g:mapleader" is used at the moment the mapping is
+defined.  Changing "g:mapleader" after that has no effect for already defined
 mappings.
 
 					*<LocalLeader>* *maplocalleader*
@@ -693,6 +721,11 @@ that's local to the script.  See |<SID>| for details.
 The special key name "<Plug>" can be used for an internal mapping, which is
 not to be matched with any key sequence.  This is useful in plugins
 |using-<Plug>|.
+
+							*<MouseMove>*
+The special key name "<MouseMove>" can be used to handle mouse movement.  It
+needs to be enabled with 'mousemoveevent'.  Currently only works in the GUI.
+The |getmousepos()| function can be used to obtain the mouse position.
 
 							*<Char>* *<Char->*
 To map a character by its decimal, octal or hexadecimal number the <Char>
@@ -1317,7 +1350,8 @@ underscore.  Example: >
 could define a mapping "<SNR>23_Add".
 
 When defining a function in a script, "s:" can be prepended to the name to
-make it local to the script.  But when a mapping is executed from outside of
+make it local to the script (in |Vim9| script functions without a prefix are
+local to the script).  But when a mapping is executed from outside of
 the script, it doesn't know in which script the function was defined.  To
 avoid this problem, use "<SID>" instead of "s:".  The same translation is done
 as for mappings.  This makes it possible to define a call to the function in
@@ -1411,7 +1445,7 @@ scripts.
 
 							*:command-verbose*
 When 'verbose' is non-zero, listing a command will also display where it was
-last defined. Example: >
+last defined and any completion argument. Example: >
 
     :verbose command TOhtml
 <	Name	    Args Range Complete  Definition ~
@@ -1444,7 +1478,7 @@ See |:verbose-cmd| for more information.
 
 
 Command attributes ~
-
+                                                       *command-attributes*
 User-defined commands are treated by Vim just like any other Ex commands.  They
 can have arguments, or have a range specified.  Arguments are subject to
 completion as filenames, buffers, etc.  Exactly how this works depends upon the
@@ -1530,6 +1564,8 @@ completion can be enabled:
 	-complete=custom,{func} custom completion, defined via {func}
 	-complete=customlist,{func} custom completion, defined via {func}
 
+If you specify completion while there is nothing to complete (-nargs=0, the
+default) then you get error *E1208* .
 Note: That some completion methods might expand environment variables.
 
 
@@ -1559,9 +1595,11 @@ The function arguments are:
 The function may use these for determining context.  For the "custom"
 argument, it is not necessary to filter candidates against the (implicit
 pattern in) ArgLead.  Vim will filter the candidates with its regexp engine
-after function return, and this is probably more efficient in most cases. For
-the "customlist" argument, Vim will not filter the returned completion
-candidates and the user supplied function should filter the candidates.
+after function return, and this is probably more efficient in most cases. If
+'wildoptions' contains "fuzzy", then the candidates will be filtered using
+|fuzzy-matching|.  For the "customlist" argument, Vim will not
+filter the returned completion candidates and the user supplied function
+should filter the candidates.
 
 The following example lists user names to a Finger command >
     :com -complete=custom,ListUsers -nargs=1 Finger !finger <args>
@@ -1688,19 +1726,19 @@ The valid escape sequences are
 		nothing. Supported modifiers are |:aboveleft|, |:belowright|,
 		|:botright|, |:browse|, |:confirm|, |:hide|, |:keepalt|,
 		|:keepjumps|, |:keepmarks|, |:keeppatterns|, |:leftabove|,
-		|:lockmarks|, |:noswapfile| |:rightbelow|, |:silent|, |:tab|,
-		|:topleft|, |:verbose|, and |:vertical|.
-		Note that these are not yet supported: |:noautocmd|,
-		|:sandbox| and |:unsilent|.
+		|:lockmarks|, |:noautocmd|, |:noswapfile| |:rightbelow|,
+		|:sandbox|, |:silent|, |:tab|, |:topleft|, |:unsilent|,
+		|:verbose|, and |:vertical|.
+		Note that |:filter| is not supported.
 		Examples: >
 		    command! -nargs=+ -complete=file MyEdit
 				\ for f in expand(<q-args>, 0, 1) |
-				\ exe '<mods> split ' . f |
+				\ exe '<mods> split ' .. f |
 				\ endfor
 
 		    function! SpecialEdit(files, mods)
 			for f in expand(a:files, 0, 1)
-			    exe a:mods . ' split ' . f
+			    exe a:mods .. ' split ' .. f
 			endfor
 		    endfunction
 		    command! -nargs=+ -complete=file Sedit
@@ -1776,7 +1814,7 @@ This will invoke: >
    :   let i = 0
    :   while i < argc()
    :	  if filereadable(argv(i))
-   :	     execute "e " . argv(i)
+   :	     execute "e " .. argv(i)
    :	     execute a:command
    :      endif
    :      let i = i + 1

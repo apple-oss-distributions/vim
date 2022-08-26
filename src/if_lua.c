@@ -949,29 +949,29 @@ luaV_list_newindex(lua_State *L)
     li = list_find(l, n);
     if (li == NULL)
     {
-        if (!lua_isnil(L, 3))
-        {
-	   typval_T v;
-	   luaV_checktypval(L, 3, &v, "inserting list item");
-	   if (list_insert_tv(l, &v, li) == FAIL)
-	        luaL_error(L, "failed to add item to list");
-	   clear_tv(&v);
-        }
+	if (!lua_isnil(L, 3))
+	{
+	    typval_T v;
+	    luaV_checktypval(L, 3, &v, "inserting list item");
+	    if (list_insert_tv(l, &v, li) == FAIL)
+		luaL_error(L, "failed to add item to list");
+	    clear_tv(&v);
+	}
     }
     else
     {
-        if (lua_isnil(L, 3)) // remove?
-        {
+	if (lua_isnil(L, 3)) // remove?
+	{
 	    vimlist_remove(l, li, li);
 	    listitem_free(l, li);
-        }
-        else
-        {
+	}
+	else
+	{
 	    typval_T v;
 	    luaV_checktypval(L, 3, &v, "setting list item");
 	    clear_tv(&li->li_tv);
 	    li->li_tv = v;
-        }
+	}
     }
     return 0;
 }
@@ -1501,7 +1501,8 @@ luaV_buffer_newindex(lua_State *L)
 	    curbuf = buf;
 	    luaL_error(L, "cannot replace line");
 	}
-	else changed_bytes(n, 0);
+	else
+	    changed_bytes(n, 0);
 	curbuf = buf;
 	if (b == curwin->w_buffer)
 	    check_cursor_col();
@@ -1542,7 +1543,7 @@ luaV_buffer_insert(lua_State *L)
     else
 	appended_lines_mark(n, 1L);
     curbuf = buf;
-    update_screen(VALID);
+    update_screen(UPD_VALID);
     return 0;
 }
 
@@ -1644,7 +1645,7 @@ luaV_window_newindex(lua_State *L)
 	if (v < 1 || v > w->w_buffer->b_ml.ml_line_count)
 	    luaL_error(L, "line out of range");
 	w->w_cursor.lnum = v;
-	update_screen(VALID);
+	update_screen(UPD_VALID);
     }
     else if (strncmp(s, "col", 3) == 0)
     {
@@ -1653,7 +1654,7 @@ luaV_window_newindex(lua_State *L)
 #endif
 	w->w_cursor.col = v - 1;
 	w->w_set_curswant = TRUE;
-	update_screen(VALID);
+	update_screen(UPD_VALID);
     }
     else if (strncmp(s, "width", 5) == 0)
     {
@@ -1913,7 +1914,7 @@ luaV_command(lua_State *L)
 
     execute_cmds_from_string(s);
     vim_free(s);
-    update_screen(VALID);
+    update_screen(UPD_VALID);
     return 0;
 }
 
@@ -2660,7 +2661,7 @@ ex_luado(exarg_T *eap)
     }
     lua_pop(L, 1); // function
     check_cursor();
-    update_screen(NOT_VALID);
+    update_screen(UPD_NOT_VALID);
 }
 
     void

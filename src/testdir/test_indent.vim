@@ -59,6 +59,29 @@ func Test_reindent()
   close!
 endfunc
 
+" Test indent operator creating one undo entry
+func Test_indent_operator_undo()
+  enew
+  call setline(1, range(12)->map('"\t" .. v:val'))
+  func FoldExpr()
+    let g:foldcount += 1
+    return '='
+  endfunc
+  set foldmethod=expr foldexpr=FoldExpr()
+  let g:foldcount = 0
+  redraw
+  call assert_equal(12, g:foldcount)
+  normal gg=G
+  call assert_equal(24, g:foldcount)
+  undo
+  call assert_equal(38, g:foldcount)
+
+  bwipe!
+  set foldmethod& foldexpr=
+  delfunc FoldExpr
+  unlet g:foldcount
+endfunc
+
 " Test for shifting a line with a preprocessor directive ('#')
 func Test_preproc_indent()
   new
@@ -119,6 +142,16 @@ func Test_lisp_indent()
   normal! jostr2"
   call assert_equal(['  ;; comment', '  ;; comment', '  \ abc', '  \ abc', '', '  ;; ret', '  " str1\', '  str1"', '  " st\b', '  str2"'], getline(2, 11))
   close!
+endfunc
+
+func Test_lisp_indent_quoted()
+  " This was going past the end of the line
+  new
+  setlocal lisp autoindent
+  call setline(1, ['"[', '='])
+  normal Gvk=
+
+  bwipe!
 endfunc
 
 " Test for setting the 'indentexpr' from a modeline

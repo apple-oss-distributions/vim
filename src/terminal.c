@@ -162,6 +162,8 @@ struct terminal_S {
     int		tl_cursor_shape;  // 1: block, 2: underline, 3: bar
     char_u	*tl_cursor_color; // NULL or allocated
 
+    long_u	*tl_palette; // array of 16 colors specified by term_start, can
+			     // be NULL
     int		tl_using_altscreen;
     garray_T	tl_osc_buf;	    // incomplete OSC string
 };
@@ -326,7 +328,8 @@ set_term_and_win_size(term_T *term, jobopt_T *opt)
 
 	    vim_snprintf((char *)buf, 100, "%dx%d",
 						 term->tl_rows, term->tl_cols);
-	    set_option_value((char_u *)"termwinsize", 0L, buf, OPT_LOCAL);
+	    set_option_value_give_err((char_u *)"termwinsize",
+							   0L, buf, OPT_LOCAL);
 	}
     }
 }
@@ -340,9 +343,9 @@ init_job_options(jobopt_T *opt)
 {
     clear_job_options(opt);
 
-    opt->jo_mode = MODE_RAW;
-    opt->jo_out_mode = MODE_RAW;
-    opt->jo_err_mode = MODE_RAW;
+    opt->jo_mode = CH_MODE_RAW;
+    opt->jo_out_mode = CH_MODE_RAW;
+    opt->jo_err_mode = CH_MODE_RAW;
     opt->jo_set = JO_MODE | JO_OUT_MODE | JO_ERR_MODE;
 }
 
@@ -703,6 +706,20 @@ term_start(
 
     if (opt->jo_set2 & JO2_TERM_HIGHLIGHT)
 	term->tl_highlight_name = vim_strsave(opt->jo_term_highlight);
+
+#if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
+    // Save the user-defined palette, it is only used in GUI (or 'tgc' is on).
+    if (opt->jo_set2 & JO2_ANSI_COLORS)
+    {
+	term->tl_palette = ALLOC_MULT(long_u, 16);
+	if (term->tl_palette == NULL)
+	{
+	    vim_free(term);
+	    return NULL;
+	}
+	memcpy(term->tl_palette, opt->jo_ansi_colors, sizeof(long_u) * 16);
+    }
+#endif
 
     // System dependent: setup the vterm and maybe start the job in it.
     if (argv == NULL
@@ -1117,6 +1134,7 @@ free_unused_terminals()
 #endif
 	vim_free(term->tl_highlight_name);
 	vim_free(term->tl_cursor_color);
+	vim_free(term->tl_palette);
 	vim_free(term);
     }
 }
@@ -1266,9 +1284,9 @@ write_to_term(buf_T *buffer, char_u *msg, channel_T *channel)
 	// cleared.
 	// TODO: only update once in a while.
 	ch_log(term->tl_job->jv_channel, "updating screen");
-	if (buffer == curbuf && (State & CMDLINE) == 0)
+	if (buffer == curbuf && (State & MODE_CMDLINE) == 0)
 	{
-	    update_screen(VALID_NO_UPDATE);
+	    update_screen(UPD_VALID_NO_UPDATE);
 	    // update_screen() can be slow, check the terminal wasn't closed
 	    // already
 	    if (buffer == curbuf && curbuf->b_term != NULL)
@@ -1609,6 +1627,16 @@ term_job_running_check(term_T *term, int check_job_status)
 term_job_running(term_T *term)
 {
     return term_job_running_check(term, FALSE);
+}
+
+/*
+ * Return TRUE if the job for "term" is still running, ignoring the job was
+ * "NONE".
+ */
+    int
+term_job_running_not_none(term_T *term)
+{
+    return term_job_running(term) && !term_none_open(term);
 }
 
 /*
@@ -1989,7 +2017,7 @@ may_move_terminal_to_buffer(term_T *term, int redraw)
 		    if (wp->w_topline < min_topline)
 			wp->w_topline = min_topline;
 		}
-		redraw_win_later(wp, NOT_VALID);
+		redraw_win_later(wp, UPD_NOT_VALID);
 	    }
 	}
     }
@@ -2035,7 +2063,7 @@ term_check_timers(int next_due_arg, proftime_T *now)
 set_terminal_mode(term_T *term, int normal_mode)
 {
     term->tl_normal_mode = normal_mode;
-    trigger_modechanged();
+    may_trigger_modechanged();
     if (!normal_mode)
 	handle_postponed_scrollback(term);
     VIM_CLEAR(term->tl_status_text);
@@ -2108,10 +2136,10 @@ term_enter_job_mode()
 
     if (term->tl_channel_closed)
 	cleanup_vterm(term);
-    redraw_buf_and_status_later(curbuf, NOT_VALID);
+    redraw_buf_and_status_later(curbuf, UPD_NOT_VALID);
 #ifdef FEAT_PROP_POPUP
     if (WIN_IS_POPUP(curwin))
-	redraw_later(NOT_VALID);
+	redraw_later(UPD_NOT_VALID);
 #endif
 }
 
@@ -2128,7 +2156,7 @@ term_vgetc()
     int modify_other_keys = curbuf->b_term->tl_vterm == NULL ? FALSE
 			: vterm_is_modify_other_keys(curbuf->b_term->tl_vterm);
 
-    State = TERMINAL;
+    State = MODE_TERMINAL;
     got_int = FALSE;
 #ifdef MSWIN
     ctrl_break_was_pressed = FALSE;
@@ -2507,7 +2535,7 @@ term_win_entered()
 	if (term_use_loop_check(TRUE))
 	{
 	    reset_VIsual_and_resel();
-	    if (State & INSERT)
+	    if (State & MODE_INSERT)
 		stop_insert_mode = TRUE;
 	}
 	mouse_was_outside = FALSE;
@@ -2794,31 +2822,24 @@ color2index(VTermColor *color, int fg, int *boldp)
     int blue = color->blue;
     int green = color->green;
 
+    *boldp = FALSE;
+
     if (VTERM_COLOR_IS_INVALID(color))
 	return 0;
+
     if (VTERM_COLOR_IS_INDEXED(color))
     {
-	// The first 16 colors and default: use the ANSI index.
-	switch (color->index + 1)
+	// Use the color as-is if possible, give up otherwise.
+	if (color->index < t_colors)
+	    return color->index + 1;
+	// 8-color terminals can actually display twice as many colors by
+	// setting the high-intensity/bold bit.
+	else if (t_colors == 8 && fg && color->index < 16)
 	{
-	    case  0: return 0;
-	    case  1: return lookup_color( 0, fg, boldp) + 1; // black
-	    case  2: return lookup_color( 4, fg, boldp) + 1; // dark red
-	    case  3: return lookup_color( 2, fg, boldp) + 1; // dark green
-	    case  4: return lookup_color( 7, fg, boldp) + 1; // dark yellow
-	    case  5: return lookup_color( 1, fg, boldp) + 1; // dark blue
-	    case  6: return lookup_color( 5, fg, boldp) + 1; // dark magenta
-	    case  7: return lookup_color( 3, fg, boldp) + 1; // dark cyan
-	    case  8: return lookup_color( 8, fg, boldp) + 1; // light grey
-	    case  9: return lookup_color(12, fg, boldp) + 1; // dark grey
-	    case 10: return lookup_color(20, fg, boldp) + 1; // red
-	    case 11: return lookup_color(16, fg, boldp) + 1; // green
-	    case 12: return lookup_color(24, fg, boldp) + 1; // yellow
-	    case 13: return lookup_color(14, fg, boldp) + 1; // blue
-	    case 14: return lookup_color(22, fg, boldp) + 1; // magenta
-	    case 15: return lookup_color(18, fg, boldp) + 1; // cyan
-	    case 16: return lookup_color(26, fg, boldp) + 1; // white
+	    *boldp = TRUE;
+	    return (color->index & 7) + 1;
 	}
+	return 0;
     }
 
     if (t_colors >= 256)
@@ -2994,7 +3015,7 @@ handle_damage(VTermRect rect, void *user)
     term->tl_dirty_row_start = MIN(term->tl_dirty_row_start, rect.start_row);
     term->tl_dirty_row_end = MAX(term->tl_dirty_row_end, rect.end_row);
     set_dirty_snapshot(term);
-    redraw_buf_later(term->tl_buffer, SOME_VALID);
+    redraw_buf_later(term->tl_buffer, UPD_SOME_VALID);
     return 1;
 }
 
@@ -3047,7 +3068,7 @@ handle_moverect(VTermRect dest, VTermRect src, void *user)
 
     // Note sure if the scrolling will work correctly, let's do a complete
     // redraw later.
-    redraw_buf_later(term->tl_buffer, NOT_VALID);
+    redraw_buf_later(term->tl_buffer, UPD_NOT_VALID);
     return 1;
 }
 
@@ -3088,6 +3109,8 @@ handle_settermprop(
     switch (prop)
     {
 	case VTERM_PROP_TITLE:
+	    if (disable_vterm_title_for_testing)
+		break;
 	    strval = vim_strnsave((char_u *)value->string.str,
 							    value->string.len);
 	    if (strval == NULL)
@@ -3130,7 +3153,10 @@ handle_settermprop(
 	    }
 	    VIM_CLEAR(term->tl_status_text);
 	    if (term == curbuf->b_term)
+	    {
 		maketitle();
+		curwin->w_redr_status = TRUE;
+	    }
 	    break;
 
 	case VTERM_PROP_CURSORVISIBLE:
@@ -3196,7 +3222,7 @@ handle_resize(int rows, int cols, void *user)
 		win_setwidth_win(cols, wp);
 	    }
 	}
-	redraw_buf_later(term->tl_buffer, NOT_VALID);
+	redraw_buf_later(term->tl_buffer, UPD_NOT_VALID);
     }
     return 1;
 }
@@ -3383,12 +3409,22 @@ handle_postponed_scrollback(term_T *term)
     limit_scrollback(term, &term->tl_scrollback, TRUE);
 }
 
+/*
+ * Called when the terminal wants to ring the system bell.
+ */
+    static int
+handle_bell(void *user UNUSED)
+{
+    vim_beep(BO_TERM);
+    return 0;
+}
+
 static VTermScreenCallbacks screen_callbacks = {
   handle_damage,	// damage
   handle_moverect,	// moverect
   handle_movecursor,	// movecursor
   handle_settermprop,	// settermprop
-  NULL,			// bell
+  handle_bell,		// bell
   handle_resize,	// resize
   handle_pushline,	// sb_pushline
   NULL			// sb_popline
@@ -3475,7 +3511,7 @@ term_after_channel_closed(term_T *term)
 	    ch_log(NULL, "terminal job finished");
     }
 
-    redraw_buf_and_status_later(term->tl_buffer, NOT_VALID);
+    redraw_buf_and_status_later(term->tl_buffer, UPD_NOT_VALID);
     return FALSE;
 }
 
@@ -3489,7 +3525,7 @@ term_after_channel_closed(term_T *term)
 may_close_term_popup(void)
 {
     if (popup_is_popup(curwin) && curbuf->b_term != NULL
-					  && !term_job_running(curbuf->b_term))
+				 && !term_job_running_not_none(curbuf->b_term))
     {
 	win_T *pwin = curwin;
 
@@ -3739,7 +3775,7 @@ update_system_term(term_T *term)
 	else
 	    pos.col = 0;
 
-	screen_line(term->tl_toprow + pos.row, 0, pos.col, Columns, 0);
+	screen_line(curwin, term->tl_toprow + pos.row, 0, pos.col, Columns, 0);
     }
 
     term->tl_dirty_row_start = MAX_ROW;
@@ -3780,9 +3816,9 @@ term_update_window(win_T *wp)
     screen = vterm_obtain_screen(vterm);
     state = vterm_obtain_state(vterm);
 
-    // We use NOT_VALID on a resize or scroll, redraw everything then.  With
-    // SOME_VALID only redraw what was marked dirty.
-    if (wp->w_redr_type > SOME_VALID)
+    // We use UPD_NOT_VALID on a resize or scroll, redraw everything then.
+    // With UPD_SOME_VALID only redraw what was marked dirty.
+    if (wp->w_redr_type > UPD_SOME_VALID)
     {
 	term->tl_dirty_row_start = 0;
 	term->tl_dirty_row_end = MAX_ROW;
@@ -3858,7 +3894,7 @@ term_update_window(win_T *wp)
 	else
 	    pos.col = 0;
 
-	screen_line(wp->w_winrow + pos.row
+	screen_line(wp, wp->w_winrow + pos.row
 #ifdef FEAT_MENU
 				+ winbar_height(wp)
 #endif
@@ -3919,7 +3955,7 @@ term_change_in_curbuf(void)
     if (term_is_finished(curbuf) && term->tl_scrollback.ga_len > 0)
     {
 	free_scrollback(term);
-	redraw_buf_later(term->tl_buffer, NOT_VALID);
+	redraw_buf_later(term->tl_buffer, UPD_NOT_VALID);
 
 	// The buffer is now like a normal buffer, it cannot be easily
 	// abandoned when changed.
@@ -4175,6 +4211,25 @@ init_default_colors(term_T *term)
 
 #if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
 /*
+ * Return TRUE if the user-defined palette (either g:terminal_ansi_colors or the
+ * "ansi_colors" argument in term_start()) shall be applied.
+ */
+    static int
+term_use_palette()
+{
+    if (0
+#ifdef FEAT_GUI
+	    || gui.in_use
+#endif
+#ifdef FEAT_TERMGUICOLORS
+	    || p_tgc
+#endif
+       )
+	return TRUE;
+    return FALSE;
+}
+
+/*
  * Set the 16 ANSI colors from array of RGB values
  */
     static void
@@ -4191,6 +4246,7 @@ set_vterm_palette(VTerm *vterm, long_u *rgb)
 	color.red = (unsigned)(rgb[index] >> 16);
 	color.green = (unsigned)(rgb[index] >> 8) & 255;
 	color.blue = (unsigned)rgb[index] & 255;
+	color.index = 0;
 	vterm_state_set_palette_color(state, index, &color);
     }
 }
@@ -4237,11 +4293,13 @@ init_vterm_ansi_colors(VTerm *vterm)
 {
     dictitem_T	*var = find_var((char_u *)"g:terminal_ansi_colors", NULL, TRUE);
 
-    if (var != NULL
-	    && (var->di_tv.v_type != VAR_LIST
-		|| var->di_tv.vval.v_list == NULL
-		|| var->di_tv.vval.v_list->lv_first == &range_list_item
-		|| set_ansi_colors_list(vterm, var->di_tv.vval.v_list) == FAIL))
+    if (var == NULL)
+	return;
+
+    if (var->di_tv.v_type != VAR_LIST
+	    || var->di_tv.vval.v_list == NULL
+	    || var->di_tv.vval.v_list->lv_first == &range_list_item
+	    || set_ansi_colors_list(vterm, var->di_tv.vval.v_list) == FAIL)
 	semsg(_(e_invalid_argument_str), "g:terminal_ansi_colors");
 }
 #endif
@@ -4280,9 +4338,9 @@ handle_drop_command(listitem_T *item)
 	dict_T *dict = opt_item->li_tv.vval.v_dict;
 	char_u *p;
 
-	p = dict_get_string(dict, (char_u *)"ff", FALSE);
+	p = dict_get_string(dict, "ff", FALSE);
 	if (p == NULL)
-	    p = dict_get_string(dict, (char_u *)"fileformat", FALSE);
+	    p = dict_get_string(dict, "fileformat", FALSE);
 	if (p != NULL)
 	{
 	    if (check_ff_value(p) == FAIL)
@@ -4290,9 +4348,9 @@ handle_drop_command(listitem_T *item)
 	    else
 		ea.force_ff = *p;
 	}
-	p = dict_get_string(dict, (char_u *)"enc", FALSE);
+	p = dict_get_string(dict, "enc", FALSE);
 	if (p == NULL)
-	    p = dict_get_string(dict, (char_u *)"encoding", FALSE);
+	    p = dict_get_string(dict, "encoding", FALSE);
 	if (p != NULL)
 	{
 	    ea.cmd = alloc(STRLEN(p) + 12);
@@ -4304,17 +4362,17 @@ handle_drop_command(listitem_T *item)
 	    }
 	}
 
-	p = dict_get_string(dict, (char_u *)"bad", FALSE);
+	p = dict_get_string(dict, "bad", FALSE);
 	if (p != NULL)
 	    get_bad_opt(p, &ea);
 
-	if (dict_find(dict, (char_u *)"bin", -1) != NULL)
+	if (dict_has_key(dict, "bin"))
 	    ea.force_bin = FORCE_BIN;
-	if (dict_find(dict, (char_u *)"binary", -1) != NULL)
+	if (dict_has_key(dict, "binary"))
 	    ea.force_bin = FORCE_BIN;
-	if (dict_find(dict, (char_u *)"nobin", -1) != NULL)
+	if (dict_has_key(dict, "nobin"))
 	    ea.force_bin = FORCE_NOBIN;
-	if (dict_find(dict, (char_u *)"nobinary", -1) != NULL)
+	if (dict_has_key(dict, "nobinary"))
 	    ea.force_bin = FORCE_NOBIN;
     }
 
@@ -4419,28 +4477,28 @@ url_decode(const char *src, const size_t len, char_u *dst)
  * "file://HOSTNAME/CURRENT/DIR"
  */
     static void
-sync_shell_dir(VTermStringFragment *frag)
+sync_shell_dir(garray_T *gap)
 {
-    int       offset = 7; // len of "file://" is 7
-    char      *pos = (char *)frag->str + offset;
+    int       offset = 7;  // len of "file://" is 7
+    char      *pos = (char *)gap->ga_data + offset;
     char_u    *new_dir;
 
     // remove HOSTNAME to get PWD
-    while (*pos != '/' && offset < (int)frag->len)
+    while (offset < (int)gap->ga_len && *pos != '/' )
     {
-        offset += 1;
-        pos += 1;
+	++offset;
+	++pos;
     }
 
-    if (offset >= (int)frag->len)
+    if (offset >= (int)gap->ga_len)
     {
-        semsg(_(e_failed_to_extract_pwd_from_str_check_your_shell_config),
-								    frag->str);
-        return;
+	semsg(_(e_failed_to_extract_pwd_from_str_check_your_shell_config),
+								 gap->ga_data);
+	return;
     }
 
-    new_dir = alloc(frag->len - offset + 1);
-    url_decode(pos, frag->len-offset, new_dir);
+    new_dir = alloc(gap->ga_len - offset + 1);
+    url_decode(pos, gap->ga_len-offset, new_dir);
     changedir_func(new_dir, TRUE, CDSCOPE_WINDOW);
     vim_free(new_dir);
 }
@@ -4460,13 +4518,7 @@ parse_osc(int command, VTermStringFragment frag, void *user)
     garray_T	*gap = &term->tl_osc_buf;
 
     // We recognize only OSC 5 1 ; {command} and OSC 7 ; {command}
-    if (p_asd && command == 7)
-    {
-	sync_shell_dir(&frag);
-	return 1;
-    }
-
-    if (command != 51)
+    if (command != 51 && (command != 7 || !p_asd))
 	return 0;
 
     // Concatenate what was received until the final piece is found.
@@ -4481,6 +4533,14 @@ parse_osc(int command, VTermStringFragment frag, void *user)
 	return 1;
 
     ((char *)gap->ga_data)[gap->ga_len] = 0;
+
+    if (command == 7)
+    {
+	sync_shell_dir(gap);
+	ga_clear(gap);
+	return 1;
+    }
+
     reader.js_buf = gap->ga_data;
     reader.js_fill = NULL;
     reader.js_used = 0;
@@ -4673,6 +4733,64 @@ create_vterm(term_T *term, int rows, int cols)
     vterm_state_set_unrecognised_fallbacks(state, &state_fallbacks, term);
 
     return OK;
+}
+
+/*
+ * Reset the terminal palette to its default value.
+ */
+    static void
+term_reset_palette(VTerm *vterm)
+{
+    VTermState	*state = vterm_obtain_state(vterm);
+    int		index;
+
+    for (index = 0; index < 16; index++)
+    {
+	VTermColor	color;
+
+	color.type = VTERM_COLOR_INDEXED;
+	ansi_color2rgb(index, &color.red, &color.green, &color.blue,
+		&color.index);
+	// The first valid index starts at 1.
+	color.index -= 1;
+
+	vterm_state_set_palette_color(state, index, &color);
+    }
+}
+
+    static void
+term_update_palette(term_T *term)
+{
+#if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
+    if (term_use_palette()
+	    && (term->tl_palette != NULL
+		|| find_var((char_u *)"g:terminal_ansi_colors", NULL, TRUE)
+								      != NULL))
+    {
+	if (term->tl_palette != NULL)
+	    set_vterm_palette(term->tl_vterm, term->tl_palette);
+	else
+	    init_vterm_ansi_colors(term->tl_vterm);
+    }
+    else
+#endif
+	term_reset_palette(term->tl_vterm);
+}
+
+/*
+ * Called when option 'termguicolors' is changed.
+ */
+    void
+term_update_palette_all()
+{
+    term_T *term;
+
+    FOR_ALL_TERMS(term)
+    {
+	if (term->tl_vterm == NULL)
+	    continue;
+	term_update_palette(term);
+    }
 }
 
 /*
@@ -4879,8 +4997,8 @@ f_term_dumpwrite(typval_T *argvars, typval_T *rettv UNUSED)
 	d = argvars[2].vval.v_dict;
 	if (d != NULL)
 	{
-	    max_height = dict_get_number(d, (char_u *)"rows");
-	    max_width = dict_get_number(d, (char_u *)"columns");
+	    max_height = dict_get_number(d, "rows");
+	    max_width = dict_get_number(d, "columns");
 	}
     }
 
@@ -5422,7 +5540,7 @@ term_load_dump(typval_T *argvars, typval_T *rettv, int do_diff)
 	    while (!(curbuf->b_ml.ml_flags & ML_EMPTY))
 		ml_delete((linenr_T)1);
 	    free_scrollback(curbuf->b_term);
-	    redraw_later(NOT_VALID);
+	    redraw_later(UPD_NOT_VALID);
 	}
     }
     else
@@ -5715,7 +5833,7 @@ term_swap_diff()
     term->tl_top_diff_rows = bot_rows;
     term->tl_bot_diff_rows = top_rows;
 
-    update_screen(NOT_VALID);
+    update_screen(UPD_NOT_VALID);
     return OK;
 }
 
@@ -6332,6 +6450,8 @@ f_term_setansicolors(typval_T *argvars, typval_T *rettv UNUSED)
 {
     buf_T	*buf;
     term_T	*term;
+    listitem_T	*li;
+    int		n = 0;
 
     if (in_vim9script()
 	    && (check_for_buffer_arg(argvars, 0) == FAIL
@@ -6350,9 +6470,38 @@ f_term_setansicolors(typval_T *argvars, typval_T *rettv UNUSED)
 	emsg(_(e_list_required));
 	return;
     }
-
-    if (set_ansi_colors_list(term->tl_vterm, argvars[1].vval.v_list) == FAIL)
+    if (argvars[1].vval.v_list->lv_first == &range_list_item
+	    || argvars[1].vval.v_list->lv_len != 16)
+    {
 	emsg(_(e_invalid_argument));
+	return;
+    }
+
+    if (term->tl_palette == NULL)
+	term->tl_palette = ALLOC_MULT(long_u, 16);
+    if (term->tl_palette == NULL)
+	return;
+
+    FOR_ALL_LIST_ITEMS(argvars[1].vval.v_list, li)
+    {
+	char_u		*color_name;
+	guicolor_T	guicolor;
+
+	color_name = tv_get_string_chk(&li->li_tv);
+	if (color_name == NULL)
+	    return;
+
+	guicolor = GUI_GET_COLOR(color_name);
+	if (guicolor == INVALCOLOR)
+	{
+	    semsg(_(e_cannot_allocate_color_str), color_name);
+	    return;
+	}
+
+	term->tl_palette[n++] = GUI_MCH_GET_RGB(guicolor);
+    }
+
+    term_update_palette(term);
 }
 #endif
 
@@ -6810,10 +6959,13 @@ conpty_term_and_job_init(
 	goto failed;
 
 #if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
-    if (opt->jo_set2 & JO2_ANSI_COLORS)
-	set_vterm_palette(term->tl_vterm, opt->jo_ansi_colors);
-    else
-	init_vterm_ansi_colors(term->tl_vterm);
+    if (term_use_palette())
+    {
+	if (term->tl_palette != NULL)
+	    set_vterm_palette(term->tl_vterm, term->tl_palette);
+	else
+	    init_vterm_ansi_colors(term->tl_vterm);
+    }
 #endif
 
     channel_set_job(channel, job, opt);
@@ -7141,10 +7293,13 @@ winpty_term_and_job_init(
 	goto failed;
 
 #if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
-    if (opt->jo_set2 & JO2_ANSI_COLORS)
-	set_vterm_palette(term->tl_vterm, opt->jo_ansi_colors);
-    else
-	init_vterm_ansi_colors(term->tl_vterm);
+    if (term_use_palette())
+    {
+	if (term->tl_palette != NULL)
+	    set_vterm_palette(term->tl_vterm, term->tl_palette);
+	else
+	    init_vterm_ansi_colors(term->tl_vterm);
+    }
 #endif
 
     channel_set_job(channel, job, opt);
@@ -7400,10 +7555,13 @@ term_and_job_init(
 	return FAIL;
 
 #if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
-    if (opt->jo_set2 & JO2_ANSI_COLORS)
-	set_vterm_palette(term->tl_vterm, opt->jo_ansi_colors);
-    else
-	init_vterm_ansi_colors(term->tl_vterm);
+    if (term_use_palette())
+    {
+	if (term->tl_palette != NULL)
+	    set_vterm_palette(term->tl_vterm, term->tl_palette);
+	else
+	    init_vterm_ansi_colors(term->tl_vterm);
+    }
 #endif
 
     // This may change a string in "argvar".

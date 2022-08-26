@@ -176,7 +176,9 @@ func Test_message_more()
   let buf = RunVimInTerminal('', {'rows': 6})
   call term_sendkeys(buf, ":call setline(1, range(1, 100))\n")
 
-  call term_sendkeys(buf, ":%p#\n")
+  call term_sendkeys(buf, ":%pfoo\<C-H>\<C-H>\<C-H>#")
+  call WaitForAssert({-> assert_equal(':%p#', term_getline(buf, 6))})
+  call term_sendkeys(buf, "\n")
   call WaitForAssert({-> assert_equal('  5 5', term_getline(buf, 5))})
   call WaitForAssert({-> assert_equal('-- More --', term_getline(buf, 6))})
 
@@ -233,7 +235,8 @@ func Test_message_more()
 
   " Up all the way with 'g'.
   call term_sendkeys(buf, 'g')
-  call WaitForAssert({-> assert_equal('  5 5', term_getline(buf, 5))})
+  call WaitForAssert({-> assert_equal('  4 4', term_getline(buf, 5))})
+  call WaitForAssert({-> assert_equal(':%p#', term_getline(buf, 1))})
   call WaitForAssert({-> assert_equal('-- More --', term_getline(buf, 6))})
 
   " All the way down. Pressing f should do nothing but pressing
@@ -249,6 +252,13 @@ func Test_message_more()
   " Pressing g< shows the previous command output.
   call term_sendkeys(buf, 'g<')
   call WaitForAssert({-> assert_equal('100 100', term_getline(buf, 5))})
+  call WaitForAssert({-> assert_equal('Press ENTER or type command to continue', term_getline(buf, 6))})
+
+  " A command line that doesn't print text is appended to scrollback,
+  " even if it invokes a nested command line.
+  call term_sendkeys(buf, ":\<C-R>=':'\<CR>:\<CR>g<")
+  call WaitForAssert({-> assert_equal('100 100', term_getline(buf, 4))})
+  call WaitForAssert({-> assert_equal(':::', term_getline(buf, 5))})
   call WaitForAssert({-> assert_equal('Press ENTER or type command to continue', term_getline(buf, 6))})
 
   call term_sendkeys(buf, ":%p#\n")
@@ -342,6 +352,99 @@ func Test_echo_string_partial()
   function CountSpaces()
   endfunction
   call assert_equal("function('CountSpaces', [{'ccccccccccc': ['ab', 'cd'], 'aaaaaaaaaaa': v:false, 'bbbbbbbbbbbb': ''}])", string(function('CountSpaces', [#{aaaaaaaaaaa: v:false, bbbbbbbbbbbb: '', ccccccccccc: ['ab', 'cd']}])))
+endfunc
+
+" Message output was previously overwritten by the fileinfo display, shown
+" when switching buffers. If a buffer is switched to, then a message if
+" echoed, we should show the message, rather than overwriting it with
+" fileinfo.
+func Test_fileinfo_after_echo()
+  CheckScreendump
+
+  let content =<< trim END
+    file a.txt
+
+    hide edit b.txt
+    call setline(1, "hi")
+    setlocal modified
+
+    hide buffer a.txt
+
+    autocmd CursorHold * buf b.txt | w | echo "'b' written"
+  END
+
+  call writefile(content, 'Xtest_fileinfo_after_echo')
+  let buf = RunVimInTerminal('-S Xtest_fileinfo_after_echo', #{rows: 6})
+  call term_sendkeys(buf, ":set updatetime=50\<CR>")
+  call term_sendkeys(buf, "0$")
+  call VerifyScreenDump(buf, 'Test_fileinfo_after_echo', {})
+
+  call term_sendkeys(buf, ":q\<CR>")
+
+  " clean up
+  call StopVimInTerminal(buf)
+  call delete('Xtest_fileinfo_after_echo')
+  call delete('b.txt')
+endfunc
+
+func Test_cmdheight_zero()
+  enew
+  set cmdheight=0
+  set showcmd
+  redraw!
+
+  echo 'test echo'
+  call assert_equal(116, screenchar(&lines, 1))
+  redraw!
+
+  echomsg 'test echomsg'
+  call assert_equal(116, screenchar(&lines, 1))
+  redraw!
+
+  call feedkeys(":ls\<CR>", "xt")
+  call assert_equal(':ls', Screenline(&lines - 1))
+  redraw!
+
+  let char = getchar(0)
+  call assert_match(char, 0)
+
+  " Check change/restore cmdheight when macro
+  call feedkeys("qa", "xt")
+  call assert_equal(1, &cmdheight)
+  call feedkeys("q", "xt")
+  call assert_equal(0, &cmdheight)
+
+  call setline(1, 'somestring')
+  call feedkeys("y", "n")
+  %s/somestring/otherstring/gc
+  call assert_equal('otherstring', getline(1))
+
+  call feedkeys("g\<C-g>", "xt")
+  call assert_match(
+        \ 'Col 1 of 11; Line 1 of 1; Word 1 of 1',
+        \ Screenline(&lines))
+
+  " Check split behavior
+  for i in range(1, 10)
+    split
+  endfor
+  only
+  call assert_equal(0, &cmdheight)
+
+  " Check that pressing ":" should not scroll a window
+  " Check for what patch 9.0.0115 fixes
+  botright 10new
+  call setline(1, range(12))
+  7
+  call feedkeys(":\"\<C-R>=line('w0')\<CR>\<CR>", "xt")
+  call assert_equal('"1', @:)
+
+  bwipe!
+  bwipe!
+  set cmdheight&
+  set showcmd&
+  tabnew
+  tabonly
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -3,7 +3,8 @@
 source shared.vim
 source check.vim
 source view_util.vim
-source vim9.vim
+import './vim9.vim' as v9
+source screendump.vim
 
 func Setup_NewWindow()
   10new
@@ -626,7 +627,7 @@ func Test_opfunc_callback()
     normal! g@l
     call assert_equal([23, 'char'], g:OpFunc1Args)
   END
-  call CheckTransLegacySuccess(lines)
+  call v9.CheckTransLegacySuccess(lines)
 
   " Test for using a script-local function name
   func s:OpFunc3(type)
@@ -684,16 +685,16 @@ func Test_opfunc_callback()
     bw!
 
     # Test for using a script-local function name
-    def s:LocalOpFunc(type: string): void
+    def LocalOpFunc(type: string): void
       g:LocalOpFuncArgs = [type]
     enddef
-    &opfunc = s:LocalOpFunc
+    &opfunc = LocalOpFunc
     g:LocalOpFuncArgs = []
     normal! g@l
     assert_equal(['char'], g:LocalOpFuncArgs)
     bw!
   END
-  call CheckScriptSuccess(lines)
+  call v9.CheckScriptSuccess(lines)
 
   " setting 'opfunc' to a script local function outside of a script context
   " should fail
@@ -891,6 +892,7 @@ endfunc
 func Test_normal_z_error()
   call assert_beeps('normal! z2p')
   call assert_beeps('normal! zq')
+  call assert_beeps('normal! cz1')
 endfunc
 
 func Test_normal15_z_scroll_vert()
@@ -930,7 +932,7 @@ func Test_normal15_z_scroll_vert()
   call assert_equal(10, winheight(0))
   exe "norm! z12\<cr>"
   call assert_equal(12, winheight(0))
-  exe "norm! z10\<cr>"
+  exe "norm! z15\<Del>0\<cr>"
   call assert_equal(10, winheight(0))
 
   " Test for z.
@@ -1992,9 +1994,16 @@ func Test_normal27_bracket()
   call assert_equal(5, line('.'))
   call assert_equal(3, col('.'))
 
-  " No mark after line 21, cursor moves to first non blank on current line
+  " No mark before line 1, cursor moves to first non-blank on current line
+  1
+  norm! 5|['
+  call assert_equal('  1   b', getline('.'))
+  call assert_equal(1, line('.'))
+  call assert_equal(3, col('.'))
+
+  " No mark after line 21, cursor moves to first non-blank on current line
   21
-  norm! $]'
+  norm! 5|]'
   call assert_equal('  21   b', getline('.'))
   call assert_equal(21, line('.'))
   call assert_equal(3, col('.'))
@@ -2007,6 +2016,34 @@ func Test_normal27_bracket()
 
   " Test for ]`
   norm! ]`
+  call assert_equal('  20   b', getline('.'))
+  call assert_equal(20, line('.'))
+  call assert_equal(8, col('.'))
+
+  " No mark before line 1, cursor does not move
+  1
+  norm! 5|[`
+  call assert_equal('  1   b', getline('.'))
+  call assert_equal(1, line('.'))
+  call assert_equal(5, col('.'))
+
+  " No mark after line 21, cursor does not move
+  21
+  norm! 5|]`
+  call assert_equal('  21   b', getline('.'))
+  call assert_equal(21, line('.'))
+  call assert_equal(5, col('.'))
+
+  " Count too large for [`
+  " cursor moves to first lowercase mark
+  norm! 99[`
+  call assert_equal('  1   b', getline('.'))
+  call assert_equal(1, line('.'))
+  call assert_equal(7, col('.'))
+
+  " Count too large for ]`
+  " cursor moves to last lowercase mark
+  norm! 99]`
   call assert_equal('  20   b', getline('.'))
   call assert_equal(20, line('.'))
   call assert_equal(8, col('.'))
@@ -2457,9 +2494,9 @@ func Test_normal33_g_cmd2()
   call assert_equal(2, line('.'))
   call assert_fails(':norm! g;', 'E662:')
   call assert_fails(':norm! g,', 'E663:')
-  let &ul=&ul
+  let &ul = &ul
   call append('$', ['a', 'b', 'c', 'd'])
-  let &ul=&ul
+  let &ul = &ul
   call append('$', ['Z', 'Y', 'X', 'W'])
   let a = execute(':changes')
   call assert_match('2\s\+0\s\+2', a)
@@ -2638,6 +2675,15 @@ func Test_normal33_g_cmd2()
 
   " clean up
   bw!
+endfunc
+
+func Test_normal_ex_substitute()
+  " This was hanging on the substitute prompt.
+  new
+  call setline(1, 'a')
+  exe "normal! gggQs/a/b/c\<CR>"
+  call assert_equal('a', getline(1))
+  bwipe!
 endfunc
 
 " Test for g CTRL-G
@@ -2934,12 +2980,6 @@ func Test_normal40_ctrl_bsl()
   call assert_false(&insertmode)
   call assert_beeps("normal! \<C-\>\<C-A>")
 
-  if has('cmdwin')
-    " Using CTRL-\ CTRL-N in cmd window should close the window
-    call feedkeys("q:\<C-\>\<C-N>", 'xt')
-    call assert_equal('', getcmdwintype())
-  endif
-
   " clean up
   bw!
 endfunc
@@ -3218,31 +3258,6 @@ func Test_gr_command()
   enew!
 endfunc
 
-" When splitting a window the changelist position is wrong.
-" Test the changelist position after splitting a window.
-" Test for the bug fixed by 7.4.386
-func Test_changelist()
-  let save_ul = &ul
-  enew!
-  call append('$', ['1', '2'])
-  exe "normal i\<C-G>u"
-  exe "normal Gkylpa\<C-G>u"
-  set ul=100
-  exe "normal Gylpa\<C-G>u"
-  set ul=100
-  normal gg
-  vsplit
-  normal g;
-  call assert_equal([3, 2], [line('.'), col('.')])
-  normal g;
-  call assert_equal([2, 2], [line('.'), col('.')])
-  call assert_fails('normal g;', 'E662:')
-  new
-  call assert_fails('normal g;', 'E664:')
-  %bwipe!
-  let &ul = save_ul
-endfunc
-
 func Test_nv_hat_count()
   %bwipeout!
   let l:nr = bufnr('%') + 1
@@ -3279,6 +3294,20 @@ func Test_message_when_using_ctrl_c()
   call assert_match("Type  :qa!  and press <Enter> to abandon all changes and exit Vim", Screenline(&lines))
 
   bwipe!
+endfunc
+
+func Test_mode_updated_after_ctrl_c()
+  CheckScreendump
+
+  let buf = RunVimInTerminal('', {'rows': 5})
+  call term_sendkeys(buf, "i")
+  call term_sendkeys(buf, "\<C-O>")
+  " wait a moment so that the "-- (insert) --" message is displayed
+  call TermWait(buf, 50)
+  call term_sendkeys(buf, "\<C-C>")
+  call VerifyScreenDump(buf, 'Test_mode_updated_1', {})
+
+  call StopVimInTerminal(buf)
 endfunc
 
 " Test for '[m', ']m', '[M' and ']M'

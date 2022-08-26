@@ -481,11 +481,7 @@ find_help_tags(
 		d += 5;
 		if (*s < ' ')
 		{
-#ifdef EBCDIC
-		    *d++ = CtrlChar(*s);
-#else
 		    *d++ = *s + '@';
-#endif
 		    if (d[-1] == '\\')
 			*d++ = '\\';	// double a backslash
 		}
@@ -651,12 +647,7 @@ prepare_help_buffer(void)
     // Accept all ASCII chars for keywords, except ' ', '*', '"', '|', and
     // latin1 word characters (for translated help files).
     // Only set it when needed, buf_init_chartab() is some work.
-    p =
-#ifdef EBCDIC
-	    (char_u *)"65-255,^*,^|,^\"";
-#else
-	    (char_u *)"!-~,^*,^|,^\",192-255";
-#endif
+    p = (char_u *)"!-~,^*,^|,^\",192-255";
     if (STRCMP(curbuf->b_p_isk, p) != 0)
     {
 	set_string_option_direct((char_u *)"isk", -1, p, OPT_FREE|OPT_LOCAL, 0);
@@ -717,7 +708,8 @@ fix_help_buffer(void)
     if (STRCMP(curbuf->b_p_ft, "help") != 0)
     {
 	++curbuf_lock;
-	set_option_value((char_u *)"ft", 0L, (char_u *)"help", OPT_LOCAL);
+	set_option_value_give_err((char_u *)"ft",
+					      0L, (char_u *)"help", OPT_LOCAL);
 	--curbuf_lock;
     }
 
@@ -956,6 +948,7 @@ helptags_one(
     FILE	*fd_tags;
     FILE	*fd;
     garray_T	ga;
+    int		res;
     int		filecount;
     char_u	**files;
     char_u	*p1, *p2;
@@ -967,6 +960,8 @@ helptags_one(
     int		utf8 = MAYBE;
     int		this_utf8;
     int		firstline;
+    int		in_example;
+    int		len;
     int		mix = FALSE;	// detected mixed encodings
 
     // Find all *.txt files.
@@ -974,12 +969,14 @@ helptags_one(
     STRCPY(NameBuff, dir);
     STRCAT(NameBuff, "/**/*");
     STRCAT(NameBuff, ext);
-    if (gen_expand_wildcards(1, &NameBuff, &filecount, &files,
-						    EW_FILE|EW_SILENT) == FAIL
-	    || filecount == 0)
+    res = gen_expand_wildcards(1, &NameBuff, &filecount, &files,
+							    EW_FILE|EW_SILENT);
+    if (res == FAIL || filecount == 0)
     {
 	if (!got_int)
 	    semsg(_(e_no_match_str_1), NameBuff);
+	if (res != FAIL)
+	    FreeWild(filecount, files);
 	return;
     }
 
@@ -1030,6 +1027,7 @@ helptags_one(
 	}
 	fname = files[fi] + dirlen + 1;
 
+	in_example = FALSE;
 	firstline = TRUE;
 	while (!vim_fgets(IObuff, IOSIZE, fd) && !got_int)
 	{
@@ -1063,6 +1061,13 @@ helptags_one(
 		    got_int = TRUE;
 		}
 		firstline = FALSE;
+	    }
+	    if (in_example)
+	    {
+		// skip over example; a non-white in the first column ends it
+		if (vim_strchr((char_u *)" \t\n\r", IObuff[0]))
+		    continue;
+		in_example = FALSE;
 	    }
 	    p1 = vim_strchr(IObuff, '*');	// find first '*'
 	    while (p1 != NULL)
@@ -1108,6 +1113,10 @@ helptags_one(
 		}
 		p1 = p2;
 	    }
+	    len = (int)STRLEN(IObuff);
+	    if ((len == 2 && STRCMP(&IObuff[len - 2], ">\n") == 0)
+		    || (len >= 3 && STRCMP(&IObuff[len - 3], " >\n") == 0))
+		in_example = TRUE;
 	    line_breakcheck();
 	}
 
@@ -1211,38 +1220,38 @@ do_helptags(char_u *dirname, int add_help_tags, int ignore_writeerr)
     for (i = 0; i < filecount; ++i)
     {
 	len = (int)STRLEN(files[i]);
-	if (len > 4)
-	{
-	    if (STRICMP(files[i] + len - 4, ".txt") == 0)
-	    {
-		// ".txt" -> language "en"
-		lang[0] = 'e';
-		lang[1] = 'n';
-	    }
-	    else if (files[i][len - 4] == '.'
-		    && ASCII_ISALPHA(files[i][len - 3])
-		    && ASCII_ISALPHA(files[i][len - 2])
-		    && TOLOWER_ASC(files[i][len - 1]) == 'x')
-	    {
-		// ".abx" -> language "ab"
-		lang[0] = TOLOWER_ASC(files[i][len - 3]);
-		lang[1] = TOLOWER_ASC(files[i][len - 2]);
-	    }
-	    else
-		continue;
+	if (len <= 4)
+	    continue;
 
-	    // Did we find this language already?
-	    for (j = 0; j < ga.ga_len; j += 2)
-		if (STRNCMP(lang, ((char_u *)ga.ga_data) + j, 2) == 0)
-		    break;
-	    if (j == ga.ga_len)
-	    {
-		// New language, add it.
-		if (ga_grow(&ga, 2) == FAIL)
-		    break;
-		((char_u *)ga.ga_data)[ga.ga_len++] = lang[0];
-		((char_u *)ga.ga_data)[ga.ga_len++] = lang[1];
-	    }
+	if (STRICMP(files[i] + len - 4, ".txt") == 0)
+	{
+	    // ".txt" -> language "en"
+	    lang[0] = 'e';
+	    lang[1] = 'n';
+	}
+	else if (files[i][len - 4] == '.'
+		&& ASCII_ISALPHA(files[i][len - 3])
+		&& ASCII_ISALPHA(files[i][len - 2])
+		&& TOLOWER_ASC(files[i][len - 1]) == 'x')
+	{
+	    // ".abx" -> language "ab"
+	    lang[0] = TOLOWER_ASC(files[i][len - 3]);
+	    lang[1] = TOLOWER_ASC(files[i][len - 2]);
+	}
+	else
+	    continue;
+
+	// Did we find this language already?
+	for (j = 0; j < ga.ga_len; j += 2)
+	    if (STRNCMP(lang, ((char_u *)ga.ga_data) + j, 2) == 0)
+		break;
+	if (j == ga.ga_len)
+	{
+	    // New language, add it.
+	    if (ga_grow(&ga, 2) == FAIL)
+		break;
+	    ((char_u *)ga.ga_data)[ga.ga_len++] = lang[0];
+	    ((char_u *)ga.ga_data)[ga.ga_len++] = lang[1];
 	}
     }
 

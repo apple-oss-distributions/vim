@@ -533,22 +533,6 @@ reg_equi_class(int c)
     if (enc_utf8 || STRCMP(p_enc, "latin1") == 0
 					 || STRCMP(p_enc, "iso-8859-15") == 0)
     {
-#ifdef EBCDIC
-	int i;
-
-	// This might be slower than switch/case below.
-	for (i = 0; i < 16; i++)
-	{
-	    if (vim_strchr(EQUIVAL_CLASS_C[i], c) != NULL)
-	    {
-		char *p = EQUIVAL_CLASS_C[i];
-
-		while (*p != 0)
-		    regmbc(*p++);
-		return;
-	    }
-	}
-#else
 	/* <rdar://problem/54102067>
 	 * POSIX or C locales require equivalance classes to only recognize
 	 * the English alphabet
@@ -1023,7 +1007,6 @@ reg_equi_class(int c)
 		      regmbc(0x1e95); regmbc(0x2c6c);
 		      return;
 	}
-#endif
     }
     regmbc(c);
 }
@@ -1531,6 +1514,14 @@ regatom(int *flagp)
 		    break;
 
 		case '#':
+		    if (regparse[0] == '=' && regparse[1] >= 48
+							  && regparse[1] <= 50)
+		    {
+			// misplaced \%#=1
+			semsg(_(e_atom_engine_must_be_at_start_of_pattern),
+								  regparse[1]);
+			return FAIL;
+		    }
 		    ret = regnode(CURSOR);
 		    break;
 
@@ -1645,6 +1636,7 @@ regatom(int *flagp)
 			      long_u	n = 0;
 			      int	cmp;
 			      int	cur = FALSE;
+			      int	got_digit = FALSE;
 
 			      cmp = c;
 			      if (cmp == '<' || cmp == '>')
@@ -1656,6 +1648,7 @@ regatom(int *flagp)
 			      }
 			      while (VIM_ISDIGIT(c))
 			      {
+				  got_digit = TRUE;
 				  n = n * 10 + (c - '0');
 				  c = getchr();
 			      }
@@ -1673,11 +1666,13 @@ regatom(int *flagp)
 				  }
 				  break;
 			      }
-			      else if (c == 'l' || c == 'c' || c == 'v')
+			      else if ((c == 'l' || c == 'c' || c == 'v')
+					  && (cur || got_digit))
 			      {
 				  if (cur && n)
 				  {
-				    semsg(_(e_regexp_number_after_dot_pos_search), no_Magic(c));
+				    semsg(_(e_regexp_number_after_dot_pos_search_chr),
+								  no_Magic(c));
 				    rc_did_emsg = TRUE;
 				    return NULL;
 				  }
@@ -1805,19 +1800,8 @@ collection:
 			    }
 			    else
 			    {
-#ifdef EBCDIC
-				int	alpha_only = FALSE;
-
-				// for alphabetical range skip the gaps
-				// 'i'-'j', 'r'-'s', 'I'-'J' and 'R'-'S'.
-				if (isalpha(startc) && isalpha(endc))
-				    alpha_only = TRUE;
-#endif
 				while (++startc <= endc)
-#ifdef EBCDIC
-				    if (!alpha_only || isalpha(startc))
-#endif
-					regc(startc);
+				    regc(startc);
 			    }
 			    startc = -1;
 			}
@@ -3179,6 +3163,29 @@ regstack_pop(char_u **scan)
     regstack.ga_len -= sizeof(regitem_T);
 }
 
+#ifdef FEAT_RELTIME
+/*
+ * Check if the timer expired, return TRUE if so.
+ */
+    static int
+bt_did_time_out(int *timed_out)
+{
+    if (*timeout_flag)
+    {
+	if (timed_out != NULL)
+	{
+# ifdef FEAT_JOB_CHANNEL
+	    if (!*timed_out)
+		ch_log(NULL, "BT regexp timed out");
+# endif
+	    *timed_out = TRUE;
+	}
+	return TRUE;
+    }
+    return FALSE;
+}
+#endif
+
 /*
  * Save the current subexpr to "bp", so that they can be restored
  * later by restore_subexpr().
@@ -3255,7 +3262,6 @@ restore_subexpr(regbehind_T *bp)
     static int
 regmatch(
     char_u	*scan,		    // Current node.
-    proftime_T	*tm UNUSED,	    // timeout limit or NULL
     int		*timed_out UNUSED)  // flag set on timeout or NULL
 {
   char_u	*next;		// Next node.
@@ -3264,9 +3270,6 @@ regmatch(
   regitem_T	*rp;
   int		no;
   int		status;		// one of the RA_ values:
-#ifdef FEAT_RELTIME
-  int		tm_count = 0;
-#endif
 
   // Make "regstack" and "backpos" empty.  They are allocated and freed in
   // bt_regexec_both() to reduce malloc()/free() calls.
@@ -3298,17 +3301,10 @@ regmatch(
 	    break;
 	}
 #ifdef FEAT_RELTIME
-	// Check for timeout once in a 100 times to avoid overhead.
-	if (tm != NULL && ++tm_count == 100)
+	if (bt_did_time_out(timed_out))
 	{
-	    tm_count = 0;
-	    if (profile_passed_limit(tm))
-	    {
-		if (timed_out != NULL)
-		    *timed_out = TRUE;
-		status = RA_FAIL;
-		break;
-	    }
+	    status = RA_FAIL;
+	    break;
 	}
 #endif
 	status = RA_CONT;
@@ -3399,8 +3395,17 @@ regmatch(
 		int	mark = OPERAND(scan)[0];
 		int	cmp = OPERAND(scan)[1];
 		pos_T	*pos;
+		size_t	col = REG_MULTI ? rex.input - rex.line : 0;
 
 		pos = getmark_buf(rex.reg_buf, mark, FALSE);
+
+		// Line may have been freed, get it again.
+		if (REG_MULTI)
+		{
+		    rex.line = reg_getline(rex.lnum);
+		    rex.input = rex.line + col;
+		}
+
 		if (pos == NULL		     // mark doesn't exist
 			|| pos->lnum <= 0)   // mark isn't set in reg_buf
 		{
@@ -3445,10 +3450,17 @@ regmatch(
 	    break;
 
 	  case RE_VCOL:
-	    if (!re_num_cmp((long_u)win_linetabsize(
-			    rex.reg_win == NULL ? curwin : rex.reg_win,
-			    rex.line, (colnr_T)(rex.input - rex.line)) + 1, scan))
-		status = RA_NOMATCH;
+	    {
+		win_T	    *wp = rex.reg_win == NULL ? curwin : rex.reg_win;
+		linenr_T    lnum = rex.reg_firstlnum + rex.lnum;
+		long_u	    vcol = 0;
+
+		if (lnum > 0 && lnum <= wp->w_buffer->b_ml.ml_line_count)
+		    vcol = (long_u)win_linetabsize(wp, lnum, rex.line,
+					      (colnr_T)(rex.input - rex.line));
+		if (!re_num_cmp(vcol + 1, scan))
+		    status = RA_NOMATCH;
+	    }
 	    break;
 
 	  case BOW:	// \<word; rex.input points to w
@@ -4654,6 +4666,11 @@ regmatch(
 			    if (rex.input == rex.line)
 			    {
 				// backup to last char of previous line
+				if (rex.lnum == 0)
+				{
+				    status = RA_NOMATCH;
+				    break;
+				}
 				--rex.lnum;
 				rex.line = reg_getline(rex.lnum);
 				// Just in case regrepeat() didn't count
@@ -4709,6 +4726,14 @@ regmatch(
 	if (status == RA_CONT || rp == (regitem_T *)
 			     ((char *)regstack.ga_data + regstack.ga_len) - 1)
 	    break;
+
+#ifdef FEAT_RELTIME
+	if (bt_did_time_out(timed_out))
+	{
+	    status = RA_FAIL;
+	    break;
+	}
+#endif
     }
 
     // May need to continue with the inner loop, starting at "scan".
@@ -4743,7 +4768,6 @@ regmatch(
 regtry(
     bt_regprog_T	*prog,
     colnr_T		col,
-    proftime_T		*tm,		// timeout limit or NULL
     int			*timed_out)	// flag set on timeout or NULL
 {
     rex.input = rex.line + col;
@@ -4753,7 +4777,7 @@ regtry(
     rex.need_clear_zsubexpr = (prog->reghasz == REX_SET);
 #endif
 
-    if (regmatch(prog->program + 1, tm, timed_out) == 0)
+    if (regmatch(prog->program + 1, timed_out) == 0)
 	return 0;
 
     cleanup_subexpr();
@@ -4828,7 +4852,6 @@ regtry(
 bt_regexec_both(
     char_u	*line,
     colnr_T	col,		// column to start looking for match
-    proftime_T	*tm,		// timeout limit or NULL
     int		*timed_out)	// flag set on timeout or NULL
 {
     bt_regprog_T    *prog;
@@ -4951,15 +4974,12 @@ bt_regexec_both(
 		    && (((enc_utf8 && utf_fold(prog->regstart) == utf_fold(c)))
 			|| (c < 255 && prog->regstart < 255 &&
 			    MB_TOLOWER(prog->regstart) == MB_TOLOWER(c)))))
-	    retval = regtry(prog, col, tm, timed_out);
+	    retval = regtry(prog, col, timed_out);
 	else
 	    retval = 0;
     }
     else
     {
-#ifdef FEAT_RELTIME
-	int tm_count = 0;
-#endif
 	// Messy cases:  unanchored match.
 	while (!got_int)
 	{
@@ -4986,7 +5006,7 @@ bt_regexec_both(
 		break;
 	    }
 
-	    retval = regtry(prog, col, tm, timed_out);
+	    retval = regtry(prog, col, timed_out);
 	    if (retval > 0)
 		break;
 
@@ -5003,17 +5023,8 @@ bt_regexec_both(
 	    else
 		++col;
 #ifdef FEAT_RELTIME
-	    // Check for timeout once in a twenty times to avoid overhead.
-	    if (tm != NULL && ++tm_count == 20)
-	    {
-		tm_count = 0;
-		if (profile_passed_limit(tm))
-		{
-		    if (timed_out != NULL)
-			*timed_out = TRUE;
-		    break;
-		}
-	    }
+	    if (bt_did_time_out(timed_out))
+		break;
 #endif
 	}
     }
@@ -5076,7 +5087,7 @@ bt_regexec_nl(
     rex.reg_icombine = FALSE;
     rex.reg_maxcol = 0;
 
-    return bt_regexec_both(line, col, NULL, NULL);
+    return bt_regexec_both(line, col, NULL);
 }
 
 /*
@@ -5094,11 +5105,10 @@ bt_regexec_multi(
     buf_T	*buf,		// buffer in which to search
     linenr_T	lnum,		// nr of line to start looking for match
     colnr_T	col,		// column to start looking for match
-    proftime_T	*tm,		// timeout limit or NULL
     int		*timed_out)	// flag set on timeout or NULL
 {
     init_regexec_multi(rmp, win, buf, lnum);
-    return bt_regexec_both(NULL, col, tm, timed_out);
+    return bt_regexec_both(NULL, col, timed_out);
 }
 
 /*

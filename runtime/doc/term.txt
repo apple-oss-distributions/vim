@@ -1,4 +1,4 @@
-*term.txt*      For Vim version 8.2.  Last change: 2021 Dec 21
+*term.txt*      For Vim version 9.0.  Last change: 2022 Apr 23
 
 
 		  VIM REFERENCE MANUAL    by Bram Moolenaar
@@ -372,8 +372,11 @@ OUTPUT CODES						*terminal-output-codes*
 
 Added by Vim (there are no standard codes for these):
 	t_AU	set underline color (ANSI)			*t_AU* *'t_AU'*
-	t_Ce	undercurl end					*t_Ce* *'t_Ce'*
-	t_Cs	undercurl mode					*t_Cs* *'t_Cs'*
+	t_Ce	undercurl and underline end			*t_Ce* *'t_Ce'*
+	t_Cs	undercurl (curly underline) mode		*t_Cs* *'t_Cs'*
+	t_Us	double underline mode				*t_Us* *'t_Us'*
+	t_ds	dotted underline mode				*t_ds* *'t_ds'*
+	t_Ds	dashed underline mode				*t_Ds* *'t_Ds'*
 	t_Te	strikethrough end				*t_Te* *'t_Te'*
 	t_Ts	strikethrough mode				*t_Ts* *'t_Ts'*
 	t_IS	set icon text start				*t_IS* *'t_IS'*
@@ -386,9 +389,10 @@ Added by Vim (there are no standard codes for these):
 	t_SR	start replace mode (underline cursor shape)	*t_SR* *'t_SR'*
 	t_EI	end insert or replace mode (block cursor shape)	*t_EI* *'t_EI'*
 		|termcap-cursor-shape|
-	t_RV	request terminal version string (for xterm)	*t_RV* *'t_RV'*
-		The response is stored in |v:termresponse|
-		|xterm-8bit| |'ttymouse'| |xterm-codes|
+	t_RV	request terminal version string (works for	*t_RV* *'t_RV'*
+		xterm and other terminal emulators)  The
+		response is stored in |v:termresponse| |xterm-8bit|
+		|'ttymouse'| |xterm-codes|
 	t_u7	request cursor position (for xterm)		*t_u7* *'t_u7'*
 		see |'ambiwidth'|
 		The response is stored in |v:termu7resp|
@@ -629,10 +633,13 @@ When the GUI is running 't_Co' is set to 16777216.
 				*termcap-cursor-shape* *termcap-cursor-color*
 When Vim enters Insert mode the 't_SI' escape sequence is sent.  When Vim
 enters Replace mode the 't_SR' escape sequence is sent if it is set, otherwise
-'t_SI' is sent.  When leaving Insert mode or Replace mode 't_EI' is used. This
-can be used to change the shape or color of the cursor in Insert or Replace
-mode. These are not standard termcap/terminfo entries, you need to set them
-yourself.
+'t_SI' is sent.  When leaving Insert mode or Replace mode 't_EI' is used.
+Note: When 't_EI' is not set then 't_SI' and 't_SR' will not be sent.  And
+when 't_SI' or 't_SR' is not set then 't_EI' is sent only once.
+
+This can be used to change the shape or color of the cursor in Insert or
+Replace mode. These are not standard termcap/terminfo entries, you need to set
+them yourself.
 Example for an xterm, this changes the color of the cursor: >
     if &term =~ "xterm"
 	let &t_SI = "\<Esc>]12;purple\x7"
@@ -725,12 +732,12 @@ size is wrong you can use the 'lines' and 'columns' options to set the
 correct values.
 
 One command can be used to set the screen size:
-
 						*:mod* *:mode* *E359*
 :mod[e] [mode]
 
 Without argument this only detects the screen size and redraws the screen.
-[mode] was used on MS-DOS, but it doesn't work anymore.
+[mode] was used on MS-DOS, but it doesn't work anymore.  In |Vim9| this
+command is not supported.
 
 ==============================================================================
 4. Slow and fast terminals			*slow-fast-terminal*
@@ -833,7 +840,7 @@ select and copy the text to the system, then press Esc.
 Another way is to temporarily use ":sh" to run a shell, copy the text, then
 exit the shell.  'mouse' can remain set to "a" then.
 							*xterm-clipboard*
-In the Athena and Motif GUI versions, when running in a terminal and there is
+In the Motif GUI version, when running in a terminal and there is
 access to the X-server (DISPLAY is set), the copy and paste will behave like
 in the GUI.  If not, the middle mouse button will insert the unnamed register.
 In that case, here is how you copy and paste a piece of text:
@@ -984,7 +991,7 @@ an #if/#else/#endif block, the selection becomes linewise.
 For MS-Windows and xterm the time for double clicking can be set with the
 'mousetime' option.  For the other systems this time is defined outside of Vim.
 An example, for using a double click to jump to the tag under the cursor: >
-	:map <2-LeftMouse> :exe "tag ". expand("<cword>")<CR>
+	:map <2-LeftMouse> :exe "tag " .. expand("<cword>")<CR>
 
 Dragging the mouse with a double click (button-down, button-up, button-down
 and then drag) will result in whole words to be selected.  This continues

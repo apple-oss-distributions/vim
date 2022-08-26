@@ -134,6 +134,31 @@ func Test_tabline_empty_group()
   set tabline=
 endfunc
 
+" When there are exactly 20 tabline format items (the exact size of the
+" initial tabline items array), test that we don't write beyond the size
+" of the array.
+func Test_tabline_20_format_items_no_overrun()
+  set showtabline=2
+
+  let tabline = repeat('%#StatColorHi2#', 20)
+  let &tabline = tabline
+  redrawtabline
+
+  set showtabline& tabline&
+endfunc
+
+func Test_mouse_click_in_tab()
+  " This used to crash because TabPageIdxs[] was not initialized
+  let lines =<< trim END
+      tabnew
+      set mouse=a
+      exe "norm \<LeftMouse>"
+  END
+  call writefile(lines, 'Xclickscript')
+  call RunVim([], [], "-e -s -S Xclickscript -c qa")
+
+  call delete('Xclickscript')
+endfunc
 
 
 " vim: shiftwidth=2 sts=2 expandtab

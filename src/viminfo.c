@@ -162,7 +162,7 @@ viminfo_writestring(FILE *fd, char_u *p)
     // the string (e.g., variable name).  Add something to the length for the
     // '<', NL and trailing NUL.
     if (len > LSIZE / 2)
-	fprintf(fd, IF_EB("\026%d\n<", CTRL_V_STR "%d\n<"), len + 3);
+	fprintf(fd, "\026%d\n<", len + 3);
 
     while ((c = *p++) != NUL)
     {
@@ -434,12 +434,8 @@ write_viminfo_bufferlist(FILE *fp)
     {
 	if (buf->b_fname == NULL
 		|| !buf->b_p_bl
-#ifdef FEAT_QUICKFIX
 		|| bt_quickfix(buf)
-#endif
-#ifdef FEAT_TERMINAL
 		|| bt_terminal(buf)
-#endif
 		|| removable(buf->b_ffname))
 	    continue;
 
@@ -1994,11 +1990,7 @@ write_buffer_marks(buf_T *buf, FILE *fp_out)
     static int
 skip_for_viminfo(buf_T *buf)
 {
-    return
-#ifdef FEAT_TERMINAL
-	    bt_terminal(buf) ||
-#endif
-	    removable(buf->b_ffname);
+    return bt_terminal(buf) || removable(buf->b_ffname);
 }
 
 /*
@@ -2485,11 +2477,9 @@ read_viminfo_filemark(vir_T *virp, int force)
     // We only get here if line[0] == '\'' or '-'.
     // Illegal mark names are ignored (for future expansion).
     str = virp->vir_line + 1;
-    if (
-#ifndef EBCDIC
-	    *str <= 127 &&
-#endif
-	    ((*virp->vir_line == '\'' && (VIM_ISDIGIT(*str) || isupper(*str)))
+    if (*str <= 127
+	    && ((*virp->vir_line == '\''
+				       && (VIM_ISDIGIT(*str) || isupper(*str)))
 	     || (*virp->vir_line == '-' && *str == '\'')))
     {
 	if (*str == '\'')

@@ -1,7 +1,7 @@
-" vim: set ft=html sw=4 :
+% vim: set ft=html sw=4 ts=8 :
 
 
-" START_INDENT
+% START_INDENT
 <html>
     <body>
 <style>
@@ -41,15 +41,21 @@ dd text
 dt text
 </dt>
 </dl>
+<div
+class="test"
+style="color: yellow">
+text
+</div>
 
     </body>
 </html>
 
-" END_INDENT
+% END_INDENT
 
 % START_INDENT
 % INDENT_EXE let g:html_indent_style1 = "inc"
 % INDENT_EXE let g:html_indent_script1 = "zero"
+% INDENT_EXE let g:html_indent_attribute = 1
 % INDENT_EXE call HtmlIndent_CheckUserSettings()
 <html>
     <body>
@@ -61,6 +67,11 @@ div#d2 { color: green; }
 	var v1 = "v1";
 var v2 = "v2";
     </script>
+<div
+class="test"
+style="color: yellow">
+text
+</div>
 </body>
 </html>
 % END_INDENT

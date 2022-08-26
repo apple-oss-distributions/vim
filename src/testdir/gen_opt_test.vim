@@ -11,10 +11,10 @@ set nomore
 " Clear out t_WS, we don't want to resize the actual terminal.
 let script = [
       \ '" DO NOT EDIT: Generated with gen_opt_test.vim',
+      \ '" Used by test_options.vim.',
       \ '',
       \ 'let save_columns = &columns',
       \ 'let save_lines = &lines',
-      \ 'let save_term = &term',
       \ 'set t_WS=',
       \ ]
 
@@ -27,7 +27,7 @@ let fontname = has('win32') ? 'fixedsys' : 'fixed'
 " Two lists with values: values that work and values that fail.
 " When not listed, "othernum" or "otherstring" is used.
 let test_values = {
-      \ 'cmdheight': [[1, 2, 10], [-1, 0]],
+      \ 'cmdheight': [[0, 1, 2, 10], [-1]],
       \ 'cmdwinheight': [[1, 2, 10], [-1, 0]],
       \ 'columns': [[12, 80], [-1, 0, 10]],
       \ 'conceallevel': [[0, 1, 2, 3], [-1, 4, 99]],
@@ -90,7 +90,7 @@ let test_values = {
       \ 'display': [['', 'lastline', 'lastline,uhex'], ['xxx']],
       \ 'eadirection': [['', 'both', 'ver'], ['xxx', 'ver,hor']],
       \ 'encoding': [['latin1'], ['xxx', '']],
-      \ 'eventignore': [['', 'WinEnter', 'WinLeave,winenter'], ['xxx']],
+      \ 'eventignore': [['', 'WinEnter', 'WinLeave,winenter', 'all,WinEnter'], ['xxx']],
       \ 'fileencoding': [['', 'latin1', 'xxx'], []],
       \ 'fileformat': [['', 'dos', 'unix'], ['xxx']],
       \ 'fileformats': [['', 'dos', 'dos,unix'], ['xxx']],
@@ -152,7 +152,7 @@ let test_values = {
       \ 'virtualedit': [['', 'all', 'all,block'], ['xxx']],
       \ 'whichwrap': [['', 'b,s', 'bs'], ['xxx']],
       \ 'wildmode': [['', 'full', 'list:full', 'full,longest'], ['xxx', 'a4', 'full,full,full,full,full']],
-      \ 'wildoptions': [['', 'tagfile'], ['xxx']],
+      \ 'wildoptions': [['', 'tagfile', 'pum', 'fuzzy'], ['xxx']],
       \ 'winaltkeys': [['menu', 'no'], ['', 'xxx']],
       \
       \ 'luadll': [[], []],
@@ -223,7 +223,6 @@ while 1
   endif
 endwhile
 
-call add(script, 'let &term = save_term')
 call add(script, 'let &columns = save_columns')
 call add(script, 'let &lines = save_lines')
 

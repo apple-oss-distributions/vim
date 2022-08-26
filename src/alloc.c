@@ -158,10 +158,10 @@ alloc(size_t size)
     void *
 alloc_id(size_t size, alloc_id_T id UNUSED)
 {
-#ifdef FEAT_EVAL
+# ifdef FEAT_EVAL
     if (alloc_fail_id == id && alloc_does_fail(size))
 	return NULL;
-#endif
+# endif
     return lalloc(size, TRUE);
 }
 #endif
@@ -180,7 +180,6 @@ alloc_clear(size_t size)
     return p;
 }
 
-#if defined(FEAT_SIGNS) || defined(PROTO)
 /*
  * Same as alloc_clear() but with allocation id for testing
  */
@@ -193,7 +192,6 @@ alloc_clear_id(size_t size, alloc_id_T id UNUSED)
 #endif
     return alloc_clear(size);
 }
-#endif
 
 /*
  * Allocate memory like lalloc() and set all bytes to zero.
@@ -404,6 +402,7 @@ free_all_mem(void)
 # ifdef FEAT_MENU
 	// Clear menus.
 	do_cmdline_cmd((char_u *)"aunmenu *");
+	do_cmdline_cmd((char_u *)"tlunmenu *");
 #  ifdef FEAT_MULTI_LANG
 	do_cmdline_cmd((char_u *)"menutranslate clear");
 #  endif
@@ -426,9 +425,7 @@ free_all_mem(void)
     }
 
     free_titles();
-# if defined(FEAT_SEARCHPATH)
     free_findfile();
-# endif
 
     // Obviously named calls.
     free_all_autocmds();
@@ -588,6 +585,9 @@ free_all_mem(void)
 # ifdef FEAT_QUICKFIX
     check_quickfix_busy();
 # endif
+# ifdef FEAT_EVAL
+    free_resub_eval_result();
+# endif
 }
 #endif
 
@@ -705,7 +705,7 @@ ga_init(garray_T *gap)
 ga_init2(garray_T *gap, size_t itemsize, int growsize)
 {
     ga_init(gap);
-    gap->ga_itemsize = itemsize;
+    gap->ga_itemsize = (int)itemsize;
     gap->ga_growsize = growsize;
 }
 
@@ -719,6 +719,20 @@ ga_grow(garray_T *gap, int n)
     if (gap->ga_maxlen - gap->ga_len < n)
 	return ga_grow_inner(gap, n);
     return OK;
+}
+
+/*
+ * Same as ga_grow() but uses an allocation id for testing.
+ */
+    int
+ga_grow_id(garray_T *gap, int n, alloc_id_T id UNUSED)
+{
+#ifdef FEAT_EVAL
+    if (alloc_fail_id == id && alloc_does_fail(sizeof(list_T)))
+	return FAIL;
+#endif
+
+    return ga_grow(gap, n);
 }
 
     int
@@ -737,11 +751,11 @@ ga_grow_inner(garray_T *gap, int n)
     if (n < gap->ga_len / 2)
 	n = gap->ga_len / 2;
 
-    new_len = gap->ga_itemsize * (gap->ga_len + n);
+    new_len = (size_t)gap->ga_itemsize * (gap->ga_len + n);
     pp = vim_realloc(gap->ga_data, new_len);
     if (pp == NULL)
 	return FAIL;
-    old_len = gap->ga_itemsize * gap->ga_maxlen;
+    old_len = (size_t)gap->ga_itemsize * gap->ga_maxlen;
     vim_memset(pp + old_len, 0, new_len - old_len);
     gap->ga_maxlen = gap->ga_len + n;
     gap->ga_data = pp;
@@ -820,7 +834,7 @@ ga_add_string(garray_T *gap, char_u *p)
 
 /*
  * Concatenate a string to a growarray which contains bytes.
- * When "s" is NULL does not do anything.
+ * When "s" is NULL memory allocation fails does not do anything.
  * Note: Does NOT copy the NUL at the end!
  */
     void
@@ -845,7 +859,7 @@ ga_concat(garray_T *gap, char_u *s)
     void
 ga_concat_len(garray_T *gap, char_u *s, size_t len)
 {
-    if (s == NULL || *s == NUL)
+    if (s == NULL || *s == NUL || len == 0)
 	return;
     if (ga_grow(gap, (int)len) == OK)
     {
@@ -857,14 +871,14 @@ ga_concat_len(garray_T *gap, char_u *s, size_t len)
 /*
  * Append one byte to a growarray which contains bytes.
  */
-    void
+    int
 ga_append(garray_T *gap, int c)
 {
-    if (ga_grow(gap, 1) == OK)
-    {
-	*((char *)gap->ga_data + gap->ga_len) = c;
-	++gap->ga_len;
-    }
+    if (ga_grow(gap, 1) == FAIL)
+	return FAIL;
+    *((char *)gap->ga_data + gap->ga_len) = c;
+    ++gap->ga_len;
+    return OK;
 }
 
 #if (defined(UNIX) && !defined(USE_SYSTEM)) || defined(MSWIN) \

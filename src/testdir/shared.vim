@@ -15,10 +15,16 @@ func PythonProg()
   if has('unix')
     " We also need the job feature or the pkill command to make sure the server
     " can be stopped.
-    if !(executable('python') && (has('job') || executable('pkill')))
+    if !(has('job') || executable('pkill'))
       return ''
     endif
-    let s:python = 'python'
+    if executable('python')
+      let s:python = 'python'
+    elseif executable('python3')
+      let s:python = 'python3'
+    else
+      return ''
+    end
   elseif has('win32')
     " Use Python Launcher for Windows (py.exe) if available.
     " NOTE: if you get a "Python was not found" error, disable the Python
@@ -242,7 +248,11 @@ let g:valgrind_cnt = 1
 func GetVimCommand(...)
   if !filereadable('vimcmd')
     echo 'Cannot read the "vimcmd" file, falling back to ../vim.'
-    let lines = ['../vim']
+    if !has("win32")
+      let lines = ['../vim']
+    else
+      let lines = ['..\vim.exe']
+    endif
   else
     let lines = readfile('vimcmd')
   endif
@@ -266,6 +276,7 @@ func GetVimCommand(...)
     let cmd = cmd . ' -u ' . name
   endif
   let cmd .= ' --not-a-term'
+  let cmd .= ' --gui-dialog-file guidialogfile'
   let cmd = substitute(cmd, 'VIMRUNTIME=\S\+', '', '')
 
   " If using valgrind, make sure every run uses a different log file.
@@ -275,6 +286,12 @@ func GetVimCommand(...)
   endif
 
   return cmd
+endfunc
+
+" Return one when it looks like the tests are run with valgrind, which means
+" that everything is much slower.
+func RunningWithValgrind()
+  return GetVimCommand() =~ '\<valgrind\>'
 endfunc
 
 " Get the command to run Vim, with --clean instead of "-u NONE".
